@@ -16,7 +16,6 @@ router.post('/account', async (req, res) => {
 // Read all accounts
 router.get('/account', async (req, res) => {
   try {
-    console.log('ehere')
     const accounts = await Account.find();
     res.json(accounts);
   } catch (err) {
