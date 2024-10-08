@@ -11,7 +11,10 @@ provider:
 custom:
   dotenv:
     path: .env.${self:provider.stage}
-
+  esbuild:
+    minify: true  # Enable minification to reduce file size
+    bundle: true  # Bundle all dependencies into a single file
+    exclude: [ 'aws-sdk' ]  # Exclude AWS SDK, available in Lambda runtime
 functions:
   api:
     handler: src/handler.handler
