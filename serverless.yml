@@ -1,27 +1,27 @@
-service: accounts-api
+service: xugera-api
 
 provider:
   name: aws
   runtime: nodejs18.x
-  region: us-east-1
+  region: ap-southeast-1
+  stage: ${opt:stage, 'test'}  # Set default stage to 'dev'
   environment:
-    MONGO_URI: ${env:MONGO_URI}
+    MONGO_URI: ${env:MONGO_URI}  # MongoDB connection URI from environment
+
+custom:
+  dotenv:
+    path: .env.${self:provider.stage}
 
 functions:
-  app:
+  api:
     handler: src/handler.handler
     events:
-      - http:
-          path: /
-          method: ANY
-      - http:
-          path: /{proxy+}
-          method: ANY
+      - httpApi: "*"
 
 plugins:
   - serverless-offline
+  - serverless-dotenv-plugin
 
 package:
   exclude:
-    - node_modules/**
     - src/tests/**
