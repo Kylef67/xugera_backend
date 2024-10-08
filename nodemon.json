@@ -1,0 +1,12 @@
+{
+    "watch": [
+      "src/**/*",
+      "serverless.yml"
+    ],
+    "ext": "js,json,yml",
+    "ignore": [
+      "node_modules/**",
+      ".serverless/**"
+    ]
+  }
+  
