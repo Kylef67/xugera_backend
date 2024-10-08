@@ -2,8 +2,7 @@ const mongoose = require('mongoose');
 
 const accountSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  balance: { type: Number, default: 0 },
+  description: { type: String, required: true },
 }, { timestamps: true });
 
 const Account = mongoose.model('Account', accountSchema);
