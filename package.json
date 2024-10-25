@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon --exec serverless offline --config nodemon.json",
-    "build": "tsc"
+    "start": "tsc && nodemon --exec serverless offline --config nodemon.json",
+    "deploy-test": "tsc && sls deploy --stage test",
+    "deploy-prod": "tsc && sls deploy --stage prod"
   },
   "author": "",
   "license": "ISC",

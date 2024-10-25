@@ -28,7 +28,7 @@ functions:
       - http:
           path: /{proxy+}
           method: any
-          private: true
+          private: ${env:REQUIRE_API_KEY, 'false'}
 
 plugins:
   - serverless-offline
