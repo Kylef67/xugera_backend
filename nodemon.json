@@ -1,6 +1,6 @@
 {
     "watch": [
-      "src/**/*",
+      "dist/**/*",
       "serverless.yml"
     ],
     "ext": "js,json,yml",

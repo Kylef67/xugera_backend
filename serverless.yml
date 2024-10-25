@@ -4,27 +4,36 @@ provider:
   name: aws
   runtime: nodejs18.x
   region: ap-southeast-1
-  stage: ${opt:stage, 'test'}  # Set default stage to 'dev'
+  stage: ${opt:stage, 'dev'}  # Set default stage to 'dev'
   environment:
-    MONGO_URI: ${env:MONGO_URI}  # MongoDB connection URI from environment
-
-custom:
-  dotenv:
-    path: .env.${self:provider.stage}
-  esbuild:
-    minify: true  # Enable minification to reduce file size
-    bundle: true  # Bundle all dependencies into a single file
-    exclude: [ 'aws-sdk' ]  # Exclude AWS SDK, available in Lambda runtime
+    MONGO_URI: ${env:MONGO_URI}
+  apiGateway:
+    apiKeys:
+      - ${self:service}-${opt:stage, 'dev'}-ApiKey  
+build:
+  esbuild:    
+    bundle: true    
+    minify: true    
+    packages: external
+    exclude:
+      - '@aws-sdk/*'
+    buildConcurrency: 3
+    sourcemap:
+      type: linked
+      setNodeOptions: true
 functions:
   api:
-    handler: src/handler.handler
+    handler: dist/handler.handler
     events:
-      - httpApi: "*"
+      - http:
+          path: /{proxy+}
+          method: any
+          private: true
 
 plugins:
   - serverless-offline
-  - serverless-dotenv-plugin
 
 package:
-  exclude:
-    - src/tests/**
+  individually: true
+  include:
+    - dist/**/*

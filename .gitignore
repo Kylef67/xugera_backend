@@ -5,3 +5,4 @@ undefined/
 .vscode/
 .env.dev
 .env.test
+dist
