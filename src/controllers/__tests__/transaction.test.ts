@@ -42,7 +42,9 @@ describe('Transaction Controller', () => {
   
   // Reset mocks and setup fresh req/res objects before each test
   beforeEach(() => {
-    req = {};
+    req = {
+      query: {} // Initialize query to empty object to prevent undefined issues
+    };
     res = {
       status: jest.fn().mockReturnThis(), // allows for chaining .json()
       json: jest.fn()
@@ -110,15 +112,237 @@ describe('Transaction Controller', () => {
     });
     
     it('should handle errors when fetching all transactions', async () => {
-      // Simulate databse error when populating results
+      // Simulate database error when populating results
+      const error = new Error('Database error');
+      
       (Transaction.find as jest.Mock).mockReturnValue({
-        populate: jest.fn().mockRejectedValueOnce(new Error('Database error'))
+        populate: jest.fn().mockRejectedValueOnce(error)
       });
       
       await transactionController.all(req as Request, res as Response);
       
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({ error: 'Database error' });
+    });
+    
+    it('should filter transactions by account ID', async () => {
+      // Setup mock data and request with account filter
+      const accountId = '123';
+      req.query = { account: accountId };
+      
+      const mockTransactions = [
+        { _id: '456', transactionDate: new Date(), account: accountId }
+      ];
+      
+      (Transaction.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockResolvedValueOnce(mockTransactions)
+      });
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      // Verify filter was applied correctly
+      expect(Transaction.find).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          account: accountId
+        })
+      );
+      expect(res.json).toHaveBeenCalledWith(mockTransactions);
+    });
+    
+    it('should filter transactions by date range', async () => {
+      // Setup mock data and request with date range filter
+      req.query = { 
+        fromDate: '2023-01-01',
+        toDate: '2023-01-31'
+      };
+      
+      const mockTransactions = [
+        { _id: '123', transactionDate: new Date('2023-01-15'), account: '456' }
+      ];
+      
+      (Transaction.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockResolvedValueOnce(mockTransactions)
+      });
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      // Verify filter was applied with date range
+      expect(Transaction.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transactionDate: expect.objectContaining({
+            $gte: expect.any(Date),
+            $lte: expect.any(Date)
+          })
+        })
+      );
+      
+      // Get the actual filter that was passed to find
+      const filterArg = (Transaction.find as jest.Mock).mock.calls[0][0];
+      
+      // Verify the dates were processed correctly
+      const fromDate = filterArg.transactionDate.$gte;
+      const toDate = filterArg.transactionDate.$lte;
+      
+      expect(fromDate.getFullYear()).toBe(2023);
+      expect(fromDate.getMonth()).toBe(0); // January is 0
+      expect(fromDate.getDate()).toBe(1);
+      expect(fromDate.getHours()).toBe(0);
+      expect(fromDate.getMinutes()).toBe(0);
+      
+      expect(toDate.getFullYear()).toBe(2023);
+      expect(toDate.getMonth()).toBe(0);
+      expect(toDate.getDate()).toBe(31);
+      expect(toDate.getHours()).toBe(23);
+      expect(toDate.getMinutes()).toBe(59);
+      expect(toDate.getSeconds()).toBe(59);
+      
+      expect(res.json).toHaveBeenCalledWith(mockTransactions);
+    });
+    
+    it('should filter transactions by date with time', async () => {
+      // Setup mock data and request with date + time filter
+      req.query = { 
+        fromDate: '2023-01-15 09:30',
+        toDate: '2023-01-15 17:45'
+      };
+      
+      const mockTransactions = [
+        { _id: '123', transactionDate: new Date('2023-01-15T12:00:00Z'), account: '456' }
+      ];
+      
+      (Transaction.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockResolvedValueOnce(mockTransactions)
+      });
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      // Get the actual filter that was passed to find
+      const filterArg = (Transaction.find as jest.Mock).mock.calls[0][0];
+      
+      // Verify the date-times were processed correctly
+      const fromDate = filterArg.transactionDate.$gte;
+      const toDate = filterArg.transactionDate.$lte;
+      
+      expect(fromDate.getFullYear()).toBe(2023);
+      expect(fromDate.getMonth()).toBe(0);
+      expect(fromDate.getDate()).toBe(15);
+      expect(fromDate.getHours()).toBe(9);
+      expect(fromDate.getMinutes()).toBe(30);
+      expect(fromDate.getSeconds()).toBe(0);
+      
+      expect(toDate.getFullYear()).toBe(2023);
+      expect(toDate.getMonth()).toBe(0);
+      expect(toDate.getDate()).toBe(15);
+      expect(toDate.getHours()).toBe(17);
+      expect(toDate.getMinutes()).toBe(45);
+      expect(toDate.getSeconds()).toBe(59);
+      
+      expect(res.json).toHaveBeenCalledWith(mockTransactions);
+    });
+    
+    it('should handle invalid date format in fromDate', async () => {
+      req.query = { 
+        fromDate: 'invalid-date'
+      };
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          error: expect.stringContaining('Invalid fromDate format')
+        })
+      );
+      
+      // Verify Transaction.find was not called
+      expect(Transaction.find).not.toHaveBeenCalled();
+    });
+    
+    it('should handle invalid date format in toDate', async () => {
+      req.query = { 
+        toDate: 'invalid-date'
+      };
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          error: expect.stringContaining('Invalid toDate format')
+        })
+      );
+      
+      // Verify Transaction.find was not called
+      expect(Transaction.find).not.toHaveBeenCalled();
+    });
+    
+    it('should handle invalid time format in fromDate', async () => {
+      req.query = { 
+        fromDate: '2023-01-15 25:70' // Invalid hours and minutes
+      };
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          error: expect.stringContaining('Invalid time values in fromDate')
+        })
+      );
+      
+      // Verify Transaction.find was not called
+      expect(Transaction.find).not.toHaveBeenCalled();
+    });
+    
+    it('should handle invalid time format in toDate', async () => {
+      req.query = { 
+        toDate: '2023-01-15 24:60' // Invalid hours and minutes
+      };
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ 
+          error: expect.stringContaining('Invalid time values in toDate')
+        })
+      );
+      
+      // Verify Transaction.find was not called
+      expect(Transaction.find).not.toHaveBeenCalled();
+    });
+    
+    it('should filter by both account and date range together', async () => {
+      // Setup mock data and request with both filters
+      const accountId = '123';
+      req.query = { 
+        account: accountId,
+        fromDate: '2023-01-01',
+        toDate: '2023-01-31'
+      };
+      
+      const mockTransactions = [
+        { _id: '456', transactionDate: new Date('2023-01-15'), account: accountId }
+      ];
+      
+      (Transaction.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockResolvedValueOnce(mockTransactions)
+      });
+      
+      await transactionController.all(req as Request, res as Response);
+      
+      // Verify filter combined both account and date range
+      expect(Transaction.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          account: accountId,
+          transactionDate: expect.objectContaining({
+            $gte: expect.any(Date),
+            $lte: expect.any(Date)
+          })
+        })
+      );
+      
+      expect(res.json).toHaveBeenCalledWith(mockTransactions);
     });
   });
   
@@ -145,7 +369,18 @@ describe('Transaction Controller', () => {
       await transactionController.get(req as Request, res as Response);
       
       expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith(new Error('Not found'));
+      expect(res.json).toHaveBeenCalledWith({ error: 'Not found' });
+    });
+    
+    it('should return 404 if transaction not found', async () => {
+      req.params = { id: 'nonexistent' };
+      
+      (Transaction.findById as jest.Mock).mockResolvedValueOnce(null);
+      
+      await transactionController.get(req as Request, res as Response);
+      
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Transaction not found' });
     });
   });
   
@@ -180,7 +415,7 @@ describe('Transaction Controller', () => {
       await transactionController.update(req as Request, res as Response);
       
       expect(res.status).toHaveBeenCalledWith(404);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Account not found' });
+      expect(res.json).toHaveBeenCalledWith({ error: 'Transaction not found' });
     });
     
     it('should handle errors when updating a transaction', async () => {
@@ -208,9 +443,7 @@ describe('Transaction Controller', () => {
       await transactionController.delete(req as Request, res as Response);
       
       expect(Transaction.findByIdAndDelete).toHaveBeenCalledWith('123');
-      // Note: the message says "Account deleted" which is a copy-paste error in the controller
-      // This test is correct based on the actual implementation
-      expect(res.json).toHaveBeenCalledWith({ message: 'Account deleted' });
+      expect(res.json).toHaveBeenCalledWith({ message: 'Transaction deleted' });
     });
     
     it('should return 404 if transaction not found during delete', async () => {
@@ -222,7 +455,7 @@ describe('Transaction Controller', () => {
       await transactionController.delete(req as Request, res as Response);
       
       expect(res.status).toHaveBeenCalledWith(404);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Account not found' });
+      expect(res.json).toHaveBeenCalledWith({ error: 'Transaction not found' });
     });
     
     it('should handle errors when deleting a transaction', async () => {

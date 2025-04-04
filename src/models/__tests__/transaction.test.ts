@@ -106,4 +106,152 @@ describe('Transaction Model', () => {
     expect(foundTransactions[0].account.toString()).toBe(accountId.toString());
     expect(foundTransactions[1].account.toString()).toBe(accountId.toString());
   });
+
+  it('should find transactions by date range', async () => {
+    // Create a mock account ID
+    const accountId = new mongoose.Types.ObjectId();
+    
+    // Create transactions with different dates
+    await new Transaction({
+      transactionDate: new Date('2023-01-01T10:00:00Z'),
+      account: accountId
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-15T14:30:00Z'),
+      account: accountId
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-31T23:00:00Z'),
+      account: accountId
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-02-15T12:00:00Z'),
+      account: accountId
+    }).save();
+    
+    // Test query for January 2023
+    const januaryTransactions = await Transaction.find({
+      transactionDate: {
+        $gte: new Date('2023-01-01T00:00:00Z'),
+        $lte: new Date('2023-01-31T23:59:59.999Z')
+      }
+    });
+    
+    expect(januaryTransactions.length).toBe(3);
+    
+    // Test query for mid-January to mid-February
+    const midMonthTransactions = await Transaction.find({
+      transactionDate: {
+        $gte: new Date('2023-01-10T00:00:00Z'),
+        $lte: new Date('2023-02-10T23:59:59.999Z')
+      }
+    });
+    
+    expect(midMonthTransactions.length).toBe(2);
+  });
+  
+  it('should find transactions by specific date with time', async () => {
+    // Create a mock account ID
+    const accountId = new mongoose.Types.ObjectId();
+    
+    // Create transactions at different times on the same day
+    await new Transaction({
+      transactionDate: new Date('2023-01-15T08:00:00Z'), // 8 AM
+      account: accountId
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-15T12:30:00Z'), // 12:30 PM
+      account: accountId
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-15T17:45:00Z'), // 5:45 PM
+      account: accountId
+    }).save();
+    
+    // Test morning transactions (before noon)
+    const morningTransactions = await Transaction.find({
+      transactionDate: {
+        $gte: new Date('2023-01-15T08:00:00Z'),
+        $lte: new Date('2023-01-15T11:59:59.999Z')
+      }
+    });
+    
+    expect(morningTransactions.length).toBe(1);
+    
+    // Test afternoon transactions (noon to 6 PM)
+    const afternoonTransactions = await Transaction.find({
+      transactionDate: {
+        $gte: new Date('2023-01-15T12:00:00Z'),
+        $lte: new Date('2023-01-15T17:59:59.999Z')
+      }
+    });
+    
+    expect(afternoonTransactions.length).toBe(2);
+  });
+  
+  it('should find transactions by account and date range together', async () => {
+    // Create two different account IDs
+    const account1 = new mongoose.Types.ObjectId();
+    const account2 = new mongoose.Types.ObjectId();
+    
+    // Add transactions for account1
+    await new Transaction({
+      transactionDate: new Date('2023-01-05T10:00:00Z'),
+      account: account1
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-20T14:00:00Z'),
+      account: account1
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-02-05T09:00:00Z'),
+      account: account1
+    }).save();
+    
+    // Add transactions for account2
+    await new Transaction({
+      transactionDate: new Date('2023-01-10T11:00:00Z'),
+      account: account2
+    }).save();
+    
+    await new Transaction({
+      transactionDate: new Date('2023-01-25T16:00:00Z'),
+      account: account2
+    }).save();
+    
+    // Query transactions for account1 in January
+    const account1JanuaryTransactions = await Transaction.find({
+      account: account1,
+      transactionDate: {
+        $gte: new Date('2023-01-01T00:00:00Z'),
+        $lte: new Date('2023-01-31T23:59:59.999Z')
+      }
+    });
+    
+    expect(account1JanuaryTransactions.length).toBe(2);
+    account1JanuaryTransactions.forEach(t => {
+      expect(t.account.toString()).toBe(account1.toString());
+      const transactionDate = new Date(t.transactionDate);
+      expect(transactionDate.getMonth()).toBe(0); // January is month 0
+      expect(transactionDate.getFullYear()).toBe(2023);
+    });
+    
+    // Query transactions for account2 in January
+    const account2JanuaryTransactions = await Transaction.find({
+      account: account2,
+      transactionDate: {
+        $gte: new Date('2023-01-01T00:00:00Z'),
+        $lte: new Date('2023-01-31T23:59:59.999Z')
+      }
+    });
+    
+    expect(account2JanuaryTransactions.length).toBe(2);
+  });
 }); 
