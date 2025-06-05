@@ -6,6 +6,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { enableScreens } from 'react-native-screens';
+
+enableScreens();
 import Dashboard from './src/screens/Dashboard';
 import Categories from './src/screens/Categories';
 import Transactions from './src/screens/Transactions';

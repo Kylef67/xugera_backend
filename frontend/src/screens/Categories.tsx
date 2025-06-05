@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateRangePicker, { DateRangeSelection } from '../components/DateRangePicker';
+import CategoryForm from './CategoryForm';
 
 type Category = {
   id: string;
@@ -11,6 +12,7 @@ type Category = {
   color: string;
   amount: number;
   transactions: number;
+  type?: 'Income' | 'Expense';
 };
 
 const initialCategories: Category[] = [
@@ -119,6 +121,8 @@ export default function Categories() {
     displayText: 'OCTOBER 2024',
     displayNumber: '31',
   });
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   
   const totalExpenses = categories.reduce((sum, category) => sum + category.amount, 0);
   
@@ -129,6 +133,37 @@ export default function Categories() {
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '₱ 0';
     return `₱ ${amount.toLocaleString('en-PH')}`;
+  };
+
+  const handlePresentModal = () => {
+    setSelectedCategory(null);
+    setShowCategoryForm(true);
+  };
+
+  const handleSaveCategory = (categoryData: any) => {
+    if (categoryData.id) {
+      // Update existing category
+      setCategories(categories.map(cat => 
+        cat.id === categoryData.id ? { ...cat, ...categoryData } : cat
+      ));
+    } else {
+      // Add new category
+      const newCategory: Category = {
+        ...categoryData,
+        id: Date.now().toString(),
+        amount: 0,
+        transactions: 0,
+      };
+      setCategories([...categories, newCategory]);
+    }
+    
+    setShowCategoryForm(false);
+    setSelectedCategory(null);
+  };
+
+  const handleEditCategory = (category: Category) => {
+    setSelectedCategory(category);
+    setShowCategoryForm(true);
   };
 
   // Calculate the percentages for the donut chart
@@ -158,6 +193,25 @@ export default function Categories() {
     );
   };
 
+  if (showCategoryForm) {
+    return (
+      <CategoryForm 
+        category={selectedCategory ? {
+          id: selectedCategory.id,
+          name: selectedCategory.name,
+          type: selectedCategory.type || 'Expense',
+          icon: selectedCategory.icon,
+          color: selectedCategory.color,
+        } : undefined}
+        onSave={handleSaveCategory}
+        onCancel={() => {
+          setShowCategoryForm(false);
+          setSelectedCategory(null);
+        }}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -170,8 +224,8 @@ export default function Categories() {
           <Text style={styles.headerBalance}>₱ 213,827</Text>
         </View>
         
-        <TouchableOpacity style={styles.addButton}>
-          <MaterialCommunityIcons name="home-variant-outline" size={28} color="#8E8E93" />
+        <TouchableOpacity style={styles.addButton} onPress={handlePresentModal}>
+          <MaterialCommunityIcons name="plus" size={28} color="#8E8E93" />
         </TouchableOpacity>
       </View>
       
@@ -185,7 +239,11 @@ export default function Categories() {
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <View style={styles.categoriesGrid}>
             {categories.map((category) => (
-              <View key={category.id} style={[styles.categoryItem, { width: itemWidth }]}>
+              <TouchableOpacity 
+                key={category.id} 
+                style={[styles.categoryItem, { width: itemWidth }]}
+                onPress={() => handleEditCategory(category)}
+              >
                 <Text style={styles.categoryName}>{category.name}</Text>
                 <Text style={[
                   styles.categoryAmount,
@@ -199,12 +257,13 @@ export default function Categories() {
                     color="#FFF" 
                   />
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </ScrollView>
         
       </View>
+
     </SafeAreaView>
   );
 }
@@ -252,8 +311,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   scrollView: {
-    flex: 1,
-    marginBottom: 230, // Make room for the donut chart at the bottom
+    flex: 1
   },
   categoriesGrid: {
     flexDirection: 'row',
