@@ -1,0 +1,1060 @@
+{
+	"info": {
+		"_postman_id": "f80b6904-11d6-4ca9-9352-998698f322da",
+		"name": "Xugera",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "13427880"
+	},
+	"item": [
+		{
+			"name": "Accounts",
+			"item": [
+				{
+					"name": "All",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{url}}/api/account",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"account"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "With Date Filtering",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/account?fromDate=2024-01-01&toDate=2024-01-31",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"account"
+									],
+									"query": [
+										{
+											"key": "fromDate",
+											"value": "2024-01-01"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-31"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "[\n    {\n        \"_id\": \"65f0d2e05c7ca86f2dedc01a\",\n        \"name\": \"Bank Account\",\n        \"description\": \"Main bank account\",\n        \"transactions\": {\n            \"balance\": 1500,\n            \"totalIncoming\": 2000,\n            \"totalOutgoing\": 500\n        }\n    }\n]"
+						}
+					]
+				},
+				{
+					"name": "Account",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Handle both direct and data-wrapped response formats\r",
+									"var responseJson = JSON.parse(responseBody);\r",
+									"var data = responseJson.data || responseJson;\r",
+									"var id = data._id;\r",
+									"\r",
+									"// Set the accountId variable\r",
+									"pm.globals.set('accountId', id);\r",
+									"console.log('Account ID set to: ' + pm.globals.get('accountId'));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\": \"New Account 6\",\r\n    \"description\": \"New Account 6\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/account",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"account"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Account",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/account/{{accountId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"account",
+								"{{accountId}}"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "With Date Filtering",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/account/{{accountId}}?fromDate=2024-01-01&toDate=2024-01-31",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"account",
+										"{{accountId}}"
+									],
+									"query": [
+										{
+											"key": "fromDate",
+											"value": "2024-01-01"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-31"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"account\": {\n        \"_id\": \"65f0d2e05c7ca86f2dedc01a\",\n        \"name\": \"Bank Account\",\n        \"description\": \"Main bank account\"\n    },\n    \"transactions\": {\n        \"balance\": 1500,\n        \"totalIncoming\": 2000,\n        \"totalOutgoing\": 500\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Account",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\": \"New Account 7\",\r\n    \"description\": \"New Account 7\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/account/{{accountId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"account",
+								"{{accountId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Account",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/account/{{accountId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"account",
+								"{{accountId}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Categories",
+			"item": [
+				{
+					"name": "All",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{url}}/api/category",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"category"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "With Date Filtering",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/category?fromDate=2024-01-01&toDate=2024-01-31",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"category"
+									],
+									"query": [
+										{
+											"key": "fromDate",
+											"value": "2024-01-01"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-31"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "[\n    {\n        \"_id\": \"65f0d2e05c7ca86f2dedc01a\",\n        \"name\": \"Food\",\n        \"description\": \"Food expenses\",\n        \"transactions\": {\n            \"direct\": {\n                \"total\": 500,\n                \"count\": 3\n            },\n            \"subcategories\": {\n                \"total\": 300,\n                \"count\": 2\n            },\n            \"all\": {\n                \"total\": 800,\n                \"count\": 5\n            }\n        }\n    }\n]"
+						}
+					]
+				},
+				{
+					"name": "Category",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Handle both direct and data-wrapped response formats\r",
+									"var responseJson = JSON.parse(responseBody);\r",
+									"var data = responseJson.data || responseJson;\r",
+									"var id = data._id;\r",
+									"\r",
+									"// Set the categoryId variable\r",
+									"pm.globals.set('categoryId', id);\r",
+									"console.log('Category ID set to: ' + pm.globals.get('categoryId'));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\": \"New Category\",\r\n    \"description\": \"New Category Description\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/category",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"category"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Category",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/category/{{categoryId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"category",
+								"{{categoryId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Category",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\": \"Updated Category\",\r\n    \"description\": \"Updated Category Description\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/category/{{categoryId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"category",
+								"{{categoryId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Category",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/category/{{categoryId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"category",
+								"{{categoryId}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Transactions",
+			"item": [
+				{
+					"name": "Transaction",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Handle both direct and data-wrapped response formats\r",
+									"var responseJson = JSON.parse(responseBody);\r",
+									"var data = responseJson.data || responseJson;\r",
+									"var id = data._id;\r",
+									"\r",
+									"// Set the transactionId variable\r",
+									"pm.globals.set('transactionId', id);\r",
+									"console.log('Transaction ID set to: ' + pm.globals.get('transactionId'));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"transactionDate\": \"2024-01-01\",\r\n    \"amount\": 100,\r\n    \"description\": \"Test transaction\",\r\n    \"fromAccount\": \"{{accountId}}\",\r\n    \"category\": \"{{categoryId}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/transaction",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"transaction"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "All",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/transaction",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"transaction"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Filter by Account",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?account={{accountId}}",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "account",
+											"value": "{{accountId}}"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Date Range",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?fromDate=2024-01-01&toDate=2024-01-31",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "fromDate",
+											"value": "2024-01-01"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-31"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Date with Time",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?fromDate=2024-01-01 09:00&toDate=2024-01-01 17:30",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "fromDate",
+											"value": "2024-01-01 09:00"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-01 17:30"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Account and Date",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?account={{accountId}}&fromDate=2024-01-01&toDate=2024-01-31",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "account",
+											"value": "{{accountId}}"
+										},
+										{
+											"key": "fromDate",
+											"value": "2024-01-01"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-31"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Account and Date with Time",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?account={{accountId}}&fromDate=2024-01-01 09:00&toDate=2024-01-01 17:30",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "account",
+											"value": "{{accountId}}"
+										},
+										{
+											"key": "fromDate",
+											"value": "2024-01-01 09:00"
+										},
+										{
+											"key": "toDate",
+											"value": "2024-01-01 17:30"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Category",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?category={{categoryId}}",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "category",
+											"value": "{{categoryId}}"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						},
+						{
+							"name": "Filter by Account and Category",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{x-api-key}}",
+										"type": "text"
+									},
+									{
+										"key": "Accept-Language",
+										"value": "{{language}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/api/transaction?account={{accountId}}&category={{categoryId}}",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"api",
+										"transaction"
+									],
+									"query": [
+										{
+											"key": "account",
+											"value": "{{accountId}}"
+										},
+										{
+											"key": "category",
+											"value": "{{categoryId}}"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [],
+							"cookie": [],
+							"body": "{\n    \"data\": []\n}"
+						}
+					]
+				},
+				{
+					"name": "Transaction",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/transaction/{{transactionId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"transaction",
+								"{{transactionId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Transaction",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"transactionDate\": \"2024-01-02\",\r\n    \"account\": {\r\n        \"_id\": \"{{accountId}}\"\r\n    },\r\n    \"category\": {\r\n        \"_id\": \"{{categoryId}}\"\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}/api/transaction/{{transactionId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"transaction",
+								"{{transactionId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Transaction",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{x-api-key}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Language",
+								"value": "{{language}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/api/transaction/{{transactionId}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"api",
+								"transaction",
+								"{{transactionId}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "language",
+			"value": "en",
+			"type": "string"
+		}
+	]
+}

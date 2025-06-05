@@ -1,0 +1,39 @@
+service: xugera-api
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-southeast-1
+  stage: ${opt:stage, 'dev'}  # Set default stage to 'dev'
+  environment:
+    MONGO_URI: ${env:MONGO_URI}
+  apiGateway:
+    apiKeys:
+      - ${self:service}-${opt:stage, 'dev'}-ApiKey  
+build:
+  esbuild:    
+    bundle: true    
+    minify: true    
+    packages: external
+    exclude:
+      - '@aws-sdk/*'
+    buildConcurrency: 3
+    sourcemap:
+      type: linked
+      setNodeOptions: true
+functions:
+  api:
+    handler: dist/handler.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: any
+          private: ${env:REQUIRE_API_KEY, 'false'}
+
+plugins:
+  - serverless-offline
+
+package:
+  individually: true
+  include:
+    - dist/**/*

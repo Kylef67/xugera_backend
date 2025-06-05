@@ -3,7 +3,7 @@
       "src/**/*",
       "serverless.yml"
     ],
-    "ext": "js,json,yml",
+    "ext": "ts,js,json,yml",
     "ignore": [
       "node_modules/**",
       ".serverless/**"
