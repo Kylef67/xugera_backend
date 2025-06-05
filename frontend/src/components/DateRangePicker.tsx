@@ -211,19 +211,106 @@ export default function DateRangePicker({
     const selectedDate = new Date(rangeMonth.getFullYear(), rangeMonth.getMonth(), day);
     
     if (!rangeStartDate || (rangeStartDate && rangeEndDate)) {
-      // Start new selection
       setRangeStartDate(selectedDate);
       setRangeEndDate(null);
     } else if (rangeStartDate && !rangeEndDate) {
-      // Complete the range
       if (selectedDate >= rangeStartDate) {
         setRangeEndDate(selectedDate);
       } else {
-        // If selected date is before start date, swap them
         setRangeEndDate(rangeStartDate);
         setRangeStartDate(selectedDate);
       }
     }
+  };
+
+  const navigatePeriod = (direction: 'prev' | 'next') => {
+    let newSelection: DateRangeSelection;
+
+    switch (selection.mode) {
+      case 'today':
+      case 'day': {
+        const currentDate = selection.startDate || new Date();
+        const newDate = new Date(currentDate);
+        newDate.setDate(currentDate.getDate() + (direction === 'next' ? 1 : -1));
+        
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        
+        newSelection = {
+          mode: selection.mode,
+          startDate: newDate,
+          endDate: newDate,
+          displayText: selection.mode === 'today' 
+            ? `${dayNames[newDate.getDay()].toUpperCase()}, ${newDate.getDate()} ${months[newDate.getMonth()].toUpperCase()} ${newDate.getFullYear()}`
+            : `${newDate.getDate()} ${months[newDate.getMonth()]} ${newDate.getFullYear()}`,
+          displayNumber: '1',
+        };
+        break;
+      }
+      
+      case 'week': {
+        const currentStart = selection.startDate || new Date();
+        const newStart = new Date(currentStart);
+        newStart.setDate(currentStart.getDate() + (direction === 'next' ? 7 : -7));
+        
+        const newEnd = new Date(newStart);
+        newEnd.setDate(newStart.getDate() + 6);
+        
+        newSelection = {
+          mode: 'week',
+          startDate: newStart,
+          endDate: newEnd,
+          displayText: `${formatDate(newStart)} – ${formatDate(newEnd)} ${newStart.getFullYear()}`.toUpperCase(),
+          displayNumber: '7',
+        };
+        break;
+      }
+      
+      case 'month': {
+        const currentDate = selection.startDate || new Date();
+        const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + (direction === 'next' ? 1 : -1), 1);
+        const startOfMonth = new Date(newDate.getFullYear(), newDate.getMonth(), 1);
+        const endOfMonth = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0);
+        
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        
+        newSelection = {
+          mode: 'month',
+          startDate: startOfMonth,
+          endDate: endOfMonth,
+          displayText: `${months[newDate.getMonth()].toUpperCase()} ${newDate.getFullYear()}`,
+          displayNumber: endOfMonth.getDate().toString(),
+        };
+        break;
+      }
+      
+      case 'date-range': {
+        if (selection.startDate && selection.endDate) {
+          const rangeDuration = selection.endDate.getTime() - selection.startDate.getTime();
+          const newStartDate = new Date(selection.startDate);
+          newStartDate.setTime(selection.startDate.getTime() + (direction === 'next' ? rangeDuration : -rangeDuration));
+          
+          const newEndDate = new Date(newStartDate);
+          newEndDate.setTime(newStartDate.getTime() + rangeDuration);
+          
+          newSelection = {
+            mode: 'date-range',
+            startDate: newStartDate,
+            endDate: newEndDate,
+            displayText: formatDateRange(newStartDate, newEndDate),
+          };
+        } else {
+          return;
+        }
+        break;
+      }
+      
+      case 'all-time':
+      default:
+        return;
+    }
+
+    onSelectionChange(newSelection);
   };
 
   const navigateMonth = (direction: 'prev' | 'next', isRangeModal = false) => {
@@ -341,7 +428,10 @@ export default function DateRangePicker({
     <View style={styles.container}>
       {/* Date Selector Button */}
       <View style={styles.dateSelector}>
-        <TouchableOpacity style={styles.dateArrow}>
+        <TouchableOpacity 
+          style={styles.dateArrow}
+          onPress={() => navigatePeriod('prev')}
+        >
           <MaterialCommunityIcons name="chevron-left" size={24} color="#8E8E93" />
         </TouchableOpacity>
         
@@ -349,11 +439,7 @@ export default function DateRangePicker({
           style={styles.dateContainer}
           onPress={() => setShowPeriodModal(true)}
         >
-          {selection.displayNumber && (
-            <View style={styles.dateCircle}>
-              <Text style={styles.dateNumber}>{selection.displayNumber}</Text>
-            </View>
-          )}
+          
           {selection.mode === 'all-time' && (
             <MaterialCommunityIcons name="infinity" size={24} color="#FFFFFF" style={styles.infinityIcon} />
           )}
@@ -361,7 +447,10 @@ export default function DateRangePicker({
           <MaterialCommunityIcons name="chevron-down" size={20} color="#8E8E93" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.dateArrow}>
+        <TouchableOpacity 
+          style={styles.dateArrow}
+          onPress={() => navigatePeriod('next')}
+        >
           <MaterialCommunityIcons name="chevron-right" size={24} color="#8E8E93" />
         </TouchableOpacity>
       </View>
