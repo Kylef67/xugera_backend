@@ -15,7 +15,7 @@ app.use(languageMiddleware);
 app.use('/api', accountRoutes);
 app.use('/api', transactionRoutes);
 app.use('/api', categoryRoutes);
-app.use('/sync', syncRoutes);
+app.use('/api/sync', syncRoutes);
 
 // MongoDB connection
 const mongoUri = process.env.MONGO_URI as string;  // Type assertion for environment variable

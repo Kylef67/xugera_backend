@@ -5,49 +5,64 @@ import Account from '../models/account';
 
 const router = Router();
 
-// Pull changes from server
+// Pull changes from server (simplified for AsyncStorage frontend)
 router.get('/pull', async (req, res) => {
   try {
-    const { lastPulledAt = 0, schemaVersion = 1 } = req.query;
-    const lastPulledTimestamp = new Date(Number(lastPulledAt));
+    const { since } = req.query;
+    const sinceDate = since ? new Date(since as string) : new Date(0);
+    
+    console.log('📥 Pull request received, since:', sinceDate.toISOString());
 
-    // Get all records updated after lastPulledAt
-    const [transactions, categories, accounts] = await Promise.all([
+    // For now, return ALL accounts and transactions, not just updated ones
+    // This ensures we don't lose data during sync
+    // TODO: Implement proper incremental sync with deletions tracking
+    const [accounts, transactions, categories] = await Promise.all([
+      Account.find({}), // Get ALL accounts
+      
       Transaction.find({
-        updatedAt: { $gt: lastPulledTimestamp }
+        updatedAt: { $gt: sinceDate }
       }).populate('fromAccount toAccount category'),
       
       Category.find({
-        updatedAt: { $gt: lastPulledTimestamp }
-      }),
-      
-      Account.find({
-        updatedAt: { $gt: lastPulledTimestamp }
+        updatedAt: { $gt: sinceDate }
       })
     ]);
 
-    // Convert to WatermelonDB format
-    const changes = {
-      transactions: {
-        created: transactions.map(convertTransactionToWatermelon),
-        updated: [],
-        deleted: []
-      },
-      categories: {
-        created: categories.map(convertCategoryToWatermelon),
-        updated: [],
-        deleted: []
-      },
-      accounts: {
-        created: accounts.map(convertAccountToWatermelon),
-        updated: [],
-        deleted: []
-      }
-    };
+    console.log('📦 Returning data:', {
+      accountsCount: accounts.length,
+      transactionsCount: transactions.length,
+      categoriesCount: categories.length
+    });
 
+    // Return simple format for AsyncStorage frontend
     res.json({
-      changes,
-      timestamp: Date.now()
+      accounts: accounts.map(account => ({
+        _id: (account as any)._id.toString(),
+        name: account.name,
+        description: account.description,
+        createdAt: (account as any).createdAt,
+        updatedAt: (account as any).updatedAt,
+        order: (account as any).order || 0
+      })),
+      transactions: transactions.map(transaction => ({
+        _id: (transaction as any)._id.toString(),
+        fromAccount: (transaction as any).fromAccount?.toString(),
+        toAccount: (transaction as any).toAccount?.toString(),
+        category: (transaction as any).category?.toString(),
+        amount: (transaction as any).amount,
+        transactionDate: (transaction as any).transactionDate,
+        description: (transaction as any).description || ''
+      })),
+      categories: categories.map(category => ({
+        _id: (category as any)._id.toString(),
+        name: (category as any).name,
+        description: (category as any).description,
+        icon: (category as any).icon,
+        parent: (category as any).parent?.toString(),
+        createdAt: (category as any).createdAt,
+        updatedAt: (category as any).updatedAt
+      })),
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Pull sync error:', error);
@@ -55,156 +70,158 @@ router.get('/pull', async (req, res) => {
   }
 });
 
-// Push changes to server
+// Push changes to server (simplified for AsyncStorage frontend)
 router.post('/push', async (req, res) => {
   try {
-    const { changes } = req.body;
+    const { accounts = [], transactions = [] } = req.body;
+    console.log('🔄 Backend received push request:', { 
+      accountsCount: accounts.length, 
+      transactionsCount: transactions.length,
+      accounts: accounts.map((a: any) => ({ localId: a.localId, name: a.name, serverId: a.serverId }))
+    });
+    
+    const results: {
+      accounts: Array<{ localId: string; serverId: string; success: boolean }>;
+      transactions: Array<{ localId: string; serverId: string; success: boolean }>;
+      errors: Array<{ type: string; localId: string; error: string }>;
+    } = {
+      accounts: [],
+      transactions: [],
+      errors: []
+    };
 
-    // Process each table
-    for (const [tableName, tableChanges] of Object.entries(changes)) {
-      const { created = [], updated = [], deleted = [] } = tableChanges as any;
-
-      // Handle created records
-      for (const record of created) {
-        await handleCreateRecord(tableName, record);
-      }
-
-      // Handle updated records
-      for (const record of updated) {
-        await handleUpdateRecord(tableName, record);
-      }
-
-      // Handle deleted records
-      for (const recordId of deleted) {
-        await handleDeleteRecord(tableName, recordId);
+    // Process accounts
+    for (const accountData of accounts) {
+      try {
+        console.log(`🏷️ Processing account: localId=${accountData.localId}, serverId=${accountData.serverId}, name=${accountData.name}`);
+        let savedAccount;
+        
+        if (accountData.serverId) {
+          console.log(`🔄 Updating existing account with serverId: ${accountData.serverId}`);
+          // Update existing account
+          const existingAccount = await Account.findById(accountData.serverId);
+          if (existingAccount) {
+            // Check for conflicts using updatedAt timestamp
+            const clientUpdated = new Date(accountData.updatedAt);
+            const serverUpdated = new Date((existingAccount as any).updatedAt || (existingAccount as any).createdAt);
+            
+            if (clientUpdated > serverUpdated) {
+              // Client is newer, update server
+              savedAccount = await Account.findByIdAndUpdate(
+                accountData.serverId,
+                {
+                  name: accountData.name,
+                  description: accountData.description,
+                  order: accountData.order
+                },
+                { new: true }
+              );
+              console.log(`✅ Updated existing account: ${savedAccount?._id}`);
+            } else {
+              // Server is newer or same, return existing
+              savedAccount = existingAccount;
+              console.log(`📋 Using existing account (server newer): ${savedAccount._id}`);
+            }
+          } else {
+            console.log(`❌ ServerId ${accountData.serverId} not found, creating new account`);
+            // Server record doesn't exist, create new one
+            savedAccount = new Account({
+              name: accountData.name,
+              description: accountData.description,
+              order: accountData.order || 0
+            });
+            await savedAccount.save();
+            console.log(`✅ Created new account: ${savedAccount._id}`);
+          }
+        } else {
+          console.log(`➕ Creating new account (no serverId)`);
+          // Create new account
+          savedAccount = new Account({
+            name: accountData.name,
+            description: accountData.description,
+            order: accountData.order || 0
+          });
+          await savedAccount.save();
+          console.log(`✅ Created new account: ${savedAccount._id}`);
+        }
+        
+        if (savedAccount) {
+          const result = {
+            localId: accountData.localId,
+            serverId: savedAccount._id?.toString() || '',
+            success: true
+          };
+          results.accounts.push(result);
+          console.log(`✅ Account result:`, result);
+        }
+      } catch (error: any) {
+        console.error(`❌ Error processing account ${accountData.localId}:`, error.message);
+        results.errors.push({
+          type: 'account',
+          localId: accountData.localId,
+          error: error.message
+        });
       }
     }
 
-    res.json({ success: true });
+    // Process transactions (similar logic)
+    for (const transactionData of transactions) {
+      try {
+        let savedTransaction;
+        
+        if (transactionData.serverId) {
+          // Update existing transaction
+          savedTransaction = await Transaction.findByIdAndUpdate(
+            transactionData.serverId,
+            {
+              fromAccount: transactionData.fromAccount,
+              toAccount: transactionData.toAccount,
+              category: transactionData.category,
+              amount: transactionData.amount,
+              transactionDate: new Date(transactionData.transactionDate),
+              description: transactionData.description
+            },
+            { new: true }
+          );
+        } else {
+          // Create new transaction
+          savedTransaction = new Transaction({
+            fromAccount: transactionData.fromAccount,
+            toAccount: transactionData.toAccount,
+            category: transactionData.category,
+            amount: transactionData.amount,
+            transactionDate: new Date(transactionData.transactionDate),
+            description: transactionData.description
+          });
+          await savedTransaction.save();
+        }
+        
+        if (savedTransaction) {
+          results.transactions.push({
+            localId: transactionData.localId,
+            serverId: savedTransaction._id?.toString() || '',
+            success: true
+          });
+        }
+      } catch (error: any) {
+        results.errors.push({
+          type: 'transaction',
+          localId: transactionData.localId,
+          error: error.message
+        });
+      }
+    }
+
+    console.log('📤 Sending results:', results);
+    res.json({
+      success: true,
+      results,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Push sync error:', error);
     res.status(500).json({ error: 'Failed to push changes' });
   }
 });
-
-// Helper functions to convert between formats
-function convertTransactionToWatermelon(transaction: any) {
-  return {
-    id: transaction._id.toString(),
-    transaction_date: transaction.transactionDate.getTime(),
-    from_account: transaction.fromAccount?.toString(),
-    to_account: transaction.toAccount?.toString(),
-    category: transaction.category?.toString(),
-    amount: transaction.amount,
-    _status: 'created',
-    _changed: ''
-  };
-}
-
-function convertCategoryToWatermelon(category: any) {
-  return {
-    id: category._id.toString(),
-    name: category.name,
-    description: category.description,
-    icon: category.icon,
-    parent: category.parent?.toString(),
-    created_at: category.createdAt.getTime(),
-    updated_at: category.updatedAt.getTime(),
-    _status: 'created',
-    _changed: ''
-  };
-}
-
-function convertAccountToWatermelon(account: any) {
-  return {
-    id: account._id.toString(),
-    name: account.name,
-    description: account.description,
-    created_at: account.createdAt.getTime(),
-    updated_at: account.updatedAt.getTime(),
-    _status: 'created',
-    _changed: ''
-  };
-}
-
-async function handleCreateRecord(tableName: string, record: any) {
-  switch (tableName) {
-    case 'transactions':
-      const transaction = new Transaction({
-        _id: record.id,
-        transactionDate: new Date(record.transaction_date),
-        fromAccount: record.from_account,
-        toAccount: record.to_account,
-        category: record.category,
-        amount: record.amount
-      });
-      await transaction.save();
-      break;
-
-    case 'categories':
-      const category = new Category({
-        _id: record.id,
-        name: record.name,
-        description: record.description,
-        icon: record.icon,
-        parent: record.parent
-      });
-      await category.save();
-      break;
-
-    case 'accounts':
-      const account = new Account({
-        _id: record.id,
-        name: record.name,
-        description: record.description
-      });
-      await account.save();
-      break;
-  }
-}
-
-async function handleUpdateRecord(tableName: string, record: any) {
-  switch (tableName) {
-    case 'transactions':
-      await Transaction.findByIdAndUpdate(record.id, {
-        transactionDate: new Date(record.transaction_date),
-        fromAccount: record.from_account,
-        toAccount: record.to_account,
-        category: record.category,
-        amount: record.amount
-      });
-      break;
-
-    case 'categories':
-      await Category.findByIdAndUpdate(record.id, {
-        name: record.name,
-        description: record.description,
-        icon: record.icon,
-        parent: record.parent
-      });
-      break;
-
-    case 'accounts':
-      await Account.findByIdAndUpdate(record.id, {
-        name: record.name,
-        description: record.description
-      });
-      break;
-  }
-}
-
-async function handleDeleteRecord(tableName: string, recordId: string) {
-  switch (tableName) {
-    case 'transactions':
-      await Transaction.findByIdAndDelete(recordId);
-      break;
-    case 'categories':
-      await Category.findByIdAndDelete(recordId);
-      break;
-    case 'accounts':
-      await Account.findByIdAndDelete(recordId);
-      break;
-  }
-}
 
 export default router; 

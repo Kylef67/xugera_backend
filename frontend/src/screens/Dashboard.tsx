@@ -1,31 +1,14 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Pressable, Alert } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Pressable, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
-import withObservables from '@nozbe/with-observables';
-import { Model } from '@nozbe/watermelondb';
-import { database, collections } from '../database';
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { syncService } from '../services/syncService';
+import { storageService, Account } from '../services/storageService';
+import { useAccounts } from '../hooks/useAccounts';
 import AddAccountDrawer from '../components/AddAccountDrawer';
 import AccountForm from './AccountForm';
-
-type Account = {
-  id: string;
-  name: string;
-  balance: number;
-  type: 'debit' | 'credit' | 'wallet';
-  icon: string;
-  color: string;
-  description?: string;
-  includeInTotal?: boolean;
-  creditLimit?: number;
-};
-
-interface DashboardProps {
-  accounts: Model[];
-  transactions: Model[];
-}
 
 const formatCurrency = (amount: number) => {
   return `₱ ${Math.abs(amount).toLocaleString('en-PH', {
@@ -34,13 +17,23 @@ const formatCurrency = (amount: number) => {
   })}`;
 };
 
-function Dashboard({ accounts, transactions }: DashboardProps) {
+export default function Dashboard() {
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
   const [showAccountForm, setShowAccountForm] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [isConnected, setIsConnected] = useState(syncService.getConnectionStatus());
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+
+  const { 
+    accounts, 
+    loading, 
+    addAccount, 
+    updateAccount, 
+    deleteAccount, 
+    refreshAccounts,
+    reorderAccounts
+  } = useAccounts();
 
   // Monitor sync status
   useEffect(() => {
@@ -48,6 +41,9 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
       setIsConnected(syncService.getConnectionStatus());
       setIsSyncing(syncService.isSyncing());
     }, 1000);
+
+    // Load last sync time
+    storageService.getLastSyncTime().then(setLastSyncTime);
 
     return () => clearInterval(interval);
   }, []);
@@ -58,7 +54,8 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
       if (syncService.getConnectionStatus()) {
         try {
           await syncService.syncData();
-          setLastSyncTime(new Date());
+          const syncTime = await storageService.getLastSyncTime();
+          setLastSyncTime(syncTime);
         } catch (error) {
           console.log('Initial sync failed:', error);
         }
@@ -68,20 +65,7 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
     performInitialSync();
   }, []);
 
-  // Convert WatermelonDB accounts to display format
-  const displayAccounts: Account[] = accounts.map((account: any) => ({
-    id: account.id,
-    name: account._raw.name || 'Unnamed Account',
-    balance: 0, // You'll need to calculate this from transactions
-    type: 'debit', // Default, you might want to add this field to your schema
-    icon: 'credit-card',
-    color: '#4CAF50',
-    description: account._raw.description || '',
-  }));
-
-  const totalBalance = displayAccounts.reduce((sum, account) => sum + account.balance, 0);
-  const positiveAccounts = displayAccounts.filter(account => account.balance >= 0);
-  const negativeAccounts = displayAccounts.filter(account => account.balance < 0);
+  const totalBalance = accounts.reduce((sum, account) => sum + account.balance, 0);
 
   const handlePresentModal = () => {
     setSelectedAccount(null);
@@ -90,38 +74,27 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
 
   const handleSaveAccount = async (accountData: any) => {
     try {
-      await database.write(async () => {
-        if (accountData.id) {
-          // Update existing account
-          const account = await collections.accounts.find(accountData.id);
-          await account.update((acc: any) => {
-            acc._raw.name = accountData.name;
-            acc._raw.description = accountData.description;
-          });
-        } else {
-          // Create new account
-          await collections.accounts.create((account: any) => {
-            account._raw.name = accountData.name;
-            account._raw.description = accountData.description;
-            account._raw.created_at = Date.now();
-            account._raw.updated_at = Date.now();
-          });
-        }
-      });
+      if (accountData.id) {
+        // Update existing account
+        await updateAccount(accountData.id, {
+          name: accountData.name,
+          description: accountData.description,
+        });
+      } else {
+        // Create new account
+        await addAccount({
+          name: accountData.name,
+          description: accountData.description,
+        });
+      }
 
       Alert.alert('Success', 'Account saved locally!');
       setShowAccountForm(false);
       setSelectedAccount(null);
       
-      // Auto-sync if online
-      if (isConnected) {
-        try {
-          await syncService.syncData();
-          setLastSyncTime(new Date());
-        } catch (error) {
-          console.log('Sync after save failed:', error);
-        }
-      }
+      // Update last sync time if sync was successful
+      const syncTime = await storageService.getLastSyncTime();
+      setLastSyncTime(syncTime);
     } catch (error) {
       Alert.alert('Error', 'Failed to save account');
       console.error(error);
@@ -141,7 +114,9 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
 
     try {
       await syncService.forceSyncNow();
-      setLastSyncTime(new Date());
+      const syncTime = await storageService.getLastSyncTime();
+      setLastSyncTime(syncTime);
+      await refreshAccounts();
       Alert.alert('Success', 'Sync completed!');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -151,13 +126,13 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
 
   const handleAddSampleAccount = async () => {
     try {
-      await database.write(async () => {
-        await collections.accounts.create((account: any) => {
-          account._raw.name = `Sample Account ${Date.now()}`;
-          account._raw.description = 'Demo account for testing';
-          account._raw.created_at = Date.now();
-          account._raw.updated_at = Date.now();
-        });
+      await addAccount({
+        name: `Sample Account ${Date.now()}`,
+        description: 'Demo account for testing',
+        balance: Math.floor(Math.random() * 10000),
+        type: 'debit',
+        icon: 'wallet',
+        color: '#4CAF50'
       });
       Alert.alert('Success', 'Sample account added!');
     } catch (error) {
@@ -165,6 +140,109 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
       console.error('Sample account error:', error);
     }
   };
+
+  // Handle drag and drop reordering
+  const handleReorder = async ({ data }: { data: Account[] }) => {
+    try {
+      await reorderAccounts(data);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to reorder accounts');
+      console.error('Reorder error:', error);
+    }
+  };
+
+  // Move account up in order
+  const moveAccountUp = async (account: Account) => {
+    const currentIndex = accounts.findIndex(acc => acc.id === account.id);
+    if (currentIndex > 0) {
+      const newAccounts = [...accounts];
+      [newAccounts[currentIndex - 1], newAccounts[currentIndex]] = [newAccounts[currentIndex], newAccounts[currentIndex - 1]];
+      await reorderAccounts(newAccounts);
+    }
+  };
+
+  // Move account down in order  
+  const moveAccountDown = async (account: Account) => {
+    const currentIndex = accounts.findIndex(acc => acc.id === account.id);
+    if (currentIndex < accounts.length - 1) {
+      const newAccounts = [...accounts];
+      [newAccounts[currentIndex], newAccounts[currentIndex + 1]] = [newAccounts[currentIndex + 1], newAccounts[currentIndex]];
+      await reorderAccounts(newAccounts);
+    }
+  };
+
+  // Render account item for draggable list
+  const renderAccountItem = useCallback(({ item: account, drag, isActive }: RenderItemParams<Account>) => {
+    const currentIndex = accounts.findIndex(acc => acc.id === account.id);
+    
+    return (
+      <TouchableOpacity 
+        style={[
+          styles.accountCard,
+          isActive && styles.accountCardActive
+        ]}
+        onPress={() => handleEditAccount(account)}
+        onLongPress={Platform.OS !== 'web' ? drag : undefined}
+      >
+        <View style={[styles.iconContainer, { backgroundColor: account.color }]}>
+          <MaterialCommunityIcons
+            name={account.icon as any}
+            size={24}
+            color="white"
+          />
+        </View>
+        <View style={styles.accountInfo}>
+          <Text style={styles.accountName}>{account.name}</Text>
+          <Text style={styles.accountDescription}>{account.description}</Text>
+          <Text style={styles.accountBalance}>
+            {formatCurrency(account.balance)}
+          </Text>
+          {!account.synced && (
+            <Text style={styles.unsyncedIndicator}>● Unsynced</Text>
+          )}
+        </View>
+        
+        {/* Web: Show arrow buttons, Mobile: Show drag handle */}
+        {Platform.OS === 'web' ? (
+          <View style={styles.webControls}>
+            <TouchableOpacity 
+              style={[styles.webButton, currentIndex === 0 && styles.webButtonDisabled]}
+              onPress={() => moveAccountUp(account)}
+              disabled={currentIndex === 0}
+            >
+              <MaterialCommunityIcons name="chevron-up" size={20} color={currentIndex === 0 ? "#555" : "#8E8E93"} />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.webButton, currentIndex === accounts.length - 1 && styles.webButtonDisabled]}
+              onPress={() => moveAccountDown(account)}
+              disabled={currentIndex === accounts.length - 1}
+            >
+              <MaterialCommunityIcons name="chevron-down" size={20} color={currentIndex === accounts.length - 1 ? "#555" : "#8E8E93"} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.dragHandle}>
+            <MaterialCommunityIcons 
+              name="drag" 
+              size={24} 
+              color={isActive ? "#6B8AFE" : "#8E8E93"} 
+            />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }, [accounts, moveAccountUp, moveAccountDown]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color="#6B8AFE" />
+          <Text style={styles.loadingText}>Loading accounts...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (showAccountForm) {
     return (
@@ -241,7 +319,7 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
         </Pressable>
       </View>
 
-      <ScrollView style={styles.scrollView}>
+      <View style={styles.scrollView}>
         <View style={styles.header}>
           <Text style={styles.sectionTitle}>Accounts ({accounts.length})</Text>
           <Text style={styles.totalAmount}>₱ {totalBalance.toLocaleString('en-PH', {
@@ -255,70 +333,38 @@ function Dashboard({ accounts, transactions }: DashboardProps) {
           <TouchableOpacity style={styles.devButton} onPress={handleAddSampleAccount}>
             <Text style={styles.devButtonText}>+ Add Sample Account</Text>
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.accountsContainer}>
-          {accounts.length === 0 ? (
-            <View style={styles.emptyState}>
-              <MaterialCommunityIcons name="wallet-plus" size={64} color="#8E8E93" />
-              <Text style={styles.emptyStateTitle}>No accounts yet</Text>
-              <Text style={styles.emptyStateText}>
-                Add your first account to start tracking your finances
-              </Text>
-              <TouchableOpacity style={styles.emptyStateButton} onPress={handlePresentModal}>
-                <Text style={styles.emptyStateButtonText}>Add Account</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            displayAccounts.map(account => (
-              <TouchableOpacity 
-                key={account.id} 
-                style={styles.accountCard}
-                onPress={() => handleEditAccount(account)}
-              >
-                <View style={[styles.iconContainer, { backgroundColor: account.color }]}>
-                  <MaterialCommunityIcons
-                    name={account.icon as any}
-                    size={24}
-                    color="white"
-                  />
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountName}>{account.name}</Text>
-                  <Text style={styles.accountDescription}>{account.description}</Text>
-                  <Text style={styles.accountBalance}>
-                    {formatCurrency(account.balance)}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))
+          {Platform.OS === 'web' && (
+            <Text style={styles.webNote}>
+              💡 On web: Use ↑↓ arrows to reorder accounts
+            </Text>
           )}
         </View>
 
-        {/* Transaction Summary */}
-        <View style={styles.transactionSummary}>
-          <Text style={styles.sectionTitle}>Recent Transactions ({transactions.length})</Text>
-          {transactions.slice(0, 3).map((transaction: any) => (
-            <View key={transaction.id} style={styles.transactionItem}>
-              <Text style={styles.transactionAmount}>₱{transaction._raw.amount || 0}</Text>
-              <Text style={styles.transactionDate}>
-                {transaction._raw.transaction_date ? new Date(transaction._raw.transaction_date).toLocaleDateString() : 'No date'}
-              </Text>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+        {/* Accounts List */}
+        {accounts.length === 0 ? (
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons name="wallet-plus" size={64} color="#8E8E93" />
+            <Text style={styles.emptyStateTitle}>No accounts yet</Text>
+            <Text style={styles.emptyStateText}>
+              Add your first account to start tracking your finances
+            </Text>
+            <TouchableOpacity style={styles.emptyStateButton} onPress={handlePresentModal}>
+              <Text style={styles.emptyStateButtonText}>Add Account</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <DraggableFlatList
+            data={accounts}
+            onDragEnd={handleReorder}
+            keyExtractor={(item) => item.id}
+            renderItem={renderAccountItem}
+            containerStyle={styles.draggableList}
+          />
+        )}
+      </View>
     </SafeAreaView>
   );
 }
-
-// Enhanced with observables for real-time updates
-const enhance = withObservables([], () => ({
-  accounts: collections.accounts.query().observe(),
-  transactions: collections.transactions.query().observe()
-}));
-
-export default enhance(Dashboard);
 
 const styles = StyleSheet.create({
   container: {
@@ -499,6 +545,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignItems: 'center',
   },
+  accountCardActive: {
+    backgroundColor: '#3C3C3E',
+  },
   iconContainer: {
     width: 40,
     height: 40,
@@ -560,5 +609,40 @@ const styles = StyleSheet.create({
   transactionDate: {
     color: '#8E8E93',
     fontSize: 14,
+  },
+  unsyncedIndicator: {
+    color: '#FF4B8C',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  dragHandle: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  draggableList: {
+    padding: 16,
+  },
+  webControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  webButton: {
+    padding: 8,
+  },
+  webButtonDisabled: {
+    opacity: 0.5,
+  },
+  webNote: {
+    color: '#8E8E93',
+    marginLeft: 8,
+    fontSize: 12,
   },
 }); 
