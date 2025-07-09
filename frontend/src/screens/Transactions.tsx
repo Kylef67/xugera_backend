@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Pressable } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateRangePicker, { DateRangeSelection } from '../components/DateRangePicker';
+import AddTransactionDrawer from '../components/AddTransactionDrawer';
+import { useData } from '../contexts/DataContext';
 
 type Transaction = {
   id: string;
@@ -14,6 +16,8 @@ type Transaction = {
   icon: string;
   iconColor: string;
   category: string;
+  fromAccount: string;
+  notes: string;
 };
 
 const formatCurrency = (amount: number) => {
@@ -23,13 +27,18 @@ const formatCurrency = (amount: number) => {
   })}`;
 };
 
+
+
 export default function Transactions() {
+  const { accounts, categories } = useData();
   const [dateSelection, setDateSelection] = useState<DateRangeSelection>({
     mode: 'month',
     displayText: 'OCTOBER 2024',
     displayNumber: '31',
   });
   const [showScheduled, setShowScheduled] = useState(true);
+  const [showTransactionForm, setShowTransactionForm] = useState(false);
+  const [editTransaction, setEditTransaction] = useState<Transaction | undefined>(undefined);
   const totalBalance = 213827;
 
   const scheduledTransactions: Transaction[] = [
@@ -42,7 +51,9 @@ export default function Transactions() {
       type: 'expense',
       icon: 'flash',
       iconColor: '#FF4B8C',
-      category: 'Bills'
+      category: 'Bills',
+      fromAccount: '1',
+      notes: 'Monthly PLDT bill'
     },
     {
       id: '2',
@@ -53,7 +64,9 @@ export default function Transactions() {
       type: 'expense',
       icon: 'flash',
       iconColor: '#FF4B8C',
-      category: 'Bills'
+      category: 'Bills',
+      fromAccount: '1',
+      notes: 'Monthly utilities'
     }
   ];
 
@@ -67,11 +80,43 @@ export default function Transactions() {
       type: 'expense',
       icon: 'cart',
       iconColor: '#4CAF50',
-      category: 'Groceries'
+      category: 'Groceries',
+      fromAccount: '1',
+      notes: 'Weekly grocery shopping'
     }
   ];
 
   const scheduledTotal = scheduledTransactions.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+
+  const handleAddTransaction = (transaction: any) => {
+    setShowTransactionForm(false);
+    setEditTransaction(undefined);
+  };
+
+  const handleEditTransaction = (transaction: Transaction) => {
+    setEditTransaction(transaction);
+    setShowTransactionForm(true);
+  };
+
+  const handleOpenAddDrawer = () => {
+    setEditTransaction(undefined);
+    setShowTransactionForm(true);
+  };
+
+  const handleCancelTransaction = () => {
+    setShowTransactionForm(false);
+    setEditTransaction(undefined);
+  };
+
+  if (showTransactionForm) {
+    return (
+      <AddTransactionDrawer
+        onSubmit={handleAddTransaction}
+        onCancel={handleCancelTransaction}
+        editTransaction={editTransaction}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -128,7 +173,11 @@ export default function Transactions() {
             </View>
 
             {scheduledTransactions.map((transaction) => (
-              <View key={transaction.id} style={styles.transactionItem}>
+              <TouchableOpacity 
+                key={transaction.id} 
+                style={styles.transactionItem}
+                onPress={() => handleEditTransaction(transaction)}
+              >
                 <View style={[styles.transactionIcon, { backgroundColor: transaction.iconColor }]}>
                   <MaterialCommunityIcons
                     name={transaction.icon as any}
@@ -143,7 +192,7 @@ export default function Transactions() {
                 <Text style={styles.transactionAmount}>
                   ₱ {Math.abs(transaction.amount).toLocaleString('en-PH')}
                 </Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         )}
@@ -160,7 +209,11 @@ export default function Transactions() {
           </View>
 
           {transactions.map((transaction) => (
-            <View key={transaction.id} style={styles.transactionItem}>
+            <TouchableOpacity 
+              key={transaction.id} 
+              style={styles.transactionItem}
+              onPress={() => handleEditTransaction(transaction)}
+            >
               <View style={[styles.transactionIcon, { backgroundColor: transaction.iconColor }]}>
                 <MaterialCommunityIcons
                   name={transaction.icon as any}
@@ -175,7 +228,7 @@ export default function Transactions() {
               <Text style={styles.transactionAmount}>
                 ₱ {Math.abs(transaction.amount).toLocaleString('en-PH')}
               </Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -184,7 +237,7 @@ export default function Transactions() {
       </ScrollView>
 
       {/* Floating Add Button */}
-      <TouchableOpacity style={styles.floatingButton}>
+      <TouchableOpacity style={styles.floatingButton} onPress={handleOpenAddDrawer}>
         <MaterialCommunityIcons name="plus" size={28} color="white" />
       </TouchableOpacity>
 

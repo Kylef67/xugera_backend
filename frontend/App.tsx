@@ -15,6 +15,7 @@ import Transactions from './src/screens/Transactions';
 import Budget from './src/screens/Budget';
 import Overview from './src/screens/Overview';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { DataProvider } from './src/contexts/DataContext';
 
 const Tab = createBottomTabNavigator();
 
@@ -22,7 +23,8 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <BottomSheetModalProvider>
+        <DataProvider>
+          <BottomSheetModalProvider>
           <NavigationContainer>
             <StatusBar style="light" />
             <Tab.Navigator
@@ -85,6 +87,7 @@ export default function App() {
             </Tab.Navigator>
           </NavigationContainer>
         </BottomSheetModalProvider>
+        </DataProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

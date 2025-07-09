@@ -4,118 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateRangePicker, { DateRangeSelection } from '../components/DateRangePicker';
 import CategoryForm from './CategoryForm';
+import { useData, Category } from '../contexts/DataContext';
 
-type Category = {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  amount: number;
-  transactions: number;
-  type?: 'Income' | 'Expense';
-};
 
-const initialCategories: Category[] = [
-  {
-    id: '1',
-    name: 'Groceries',
-    icon: 'cart',
-    color: '#3D9BFC',
-    amount: 0,
-    transactions: 1,
-  },
-  {
-    id: '2',
-    name: 'Eating out',
-    icon: 'silverware-fork-knife',
-    color: '#505F92',
-    amount: 10023,
-    transactions: 0,
-  },
-  {
-    id: '3',
-    name: 'Leisure',
-    icon: 'ticket',
-    color: '#E6427B',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '4',
-    name: 'Transport',
-    icon: 'bus',
-    color: '#C09046',
-    amount: 33672,
-    transactions: 0,
-  },
-  {
-    id: '5',
-    name: 'Health',
-    icon: 'heart-pulse',
-    color: '#3A8A47',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '6',
-    name: 'Gifts',
-    icon: 'gift',
-    color: '#E74C3C',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '7',
-    name: 'Family',
-    icon: 'account-group',
-    color: '#5D3F92',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '8',
-    name: 'Shopping',
-    icon: 'shopping',
-    color: '#C1834B',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '9',
-    name: 'Bills',
-    icon: 'file-document',
-    color: '#FF5B9E',
-    amount: 0,
-    transactions: 1,
-  },
-  {
-    id: '10',
-    name: 'Gas',
-    icon: 'gas-station',
-    color: '#F39C12',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '11',
-    name: 'Transfer fees',
-    icon: 'bank-transfer',
-    color: '#3498DB',
-    amount: 0,
-    transactions: 0,
-  },
-  {
-    id: '12',
-    name: 'More...',
-    icon: 'chevron-down',
-    color: '#95A5A6',
-    amount: 5001,
-    transactions: 0,
-  },
-];
 
 export default function Categories() {
-  const [categories, setCategories] = useState(initialCategories);
+  const { categories, addCategory, updateCategory } = useData();
   const [dateSelection, setDateSelection] = useState<DateRangeSelection>({
     mode: 'month',
     displayText: 'OCTOBER 2024',
@@ -124,10 +18,10 @@ export default function Categories() {
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   
-  const totalExpenses = categories.reduce((sum, category) => sum + category.amount, 0);
+  const totalExpenses = categories.reduce((sum, category) => sum + (category.amount || 0), 0);
   
   // Get categories with transactions this month
-  const activeCategories = categories.filter(cat => cat.amount > 0 || cat.transactions > 0);
+  const activeCategories = categories.filter(cat => (cat.amount || 0) > 0 || (cat.transactions || 0) > 0);
   
   // Format currency to ₱ X,XXX
   const formatCurrency = (amount: number) => {
@@ -143,9 +37,7 @@ export default function Categories() {
   const handleSaveCategory = (categoryData: any) => {
     if (categoryData.id) {
       // Update existing category
-      setCategories(categories.map(cat => 
-        cat.id === categoryData.id ? { ...cat, ...categoryData } : cat
-      ));
+      updateCategory({ ...categoryData });
     } else {
       // Add new category
       const newCategory: Category = {
@@ -154,7 +46,7 @@ export default function Categories() {
         amount: 0,
         transactions: 0,
       };
-      setCategories([...categories, newCategory]);
+      addCategory(newCategory);
     }
     
     setShowCategoryForm(false);
@@ -167,7 +59,7 @@ export default function Categories() {
   };
 
   // Calculate the percentages for the donut chart
-  const totalAmount = categories.reduce((sum, cat) => sum + cat.amount, 0);
+  const totalAmount = categories.reduce((sum, cat) => sum + (cat.amount || 0), 0);
   
   // Calculate the width of each category item based on screen width
   const screenWidth = Dimensions.get('window').width;
@@ -247,8 +139,8 @@ export default function Categories() {
                 <Text style={styles.categoryName}>{category.name}</Text>
                 <Text style={[
                   styles.categoryAmount,
-                  category.amount > 0 ? styles.hasAmount : null
-                ]}>{formatCurrency(category.amount)}</Text>
+                  (category.amount || 0) > 0 ? styles.hasAmount : null
+                ]}>{formatCurrency(category.amount || 0)}</Text>
                 
                 <View style={[styles.iconContainer, { backgroundColor: category.color }]}>
                   <MaterialCommunityIcons 

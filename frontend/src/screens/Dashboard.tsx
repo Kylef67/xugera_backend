@@ -5,18 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import AddAccountDrawer from '../components/AddAccountDrawer';
 import AccountForm from './AccountForm';
-
-type Account = {
-  id: string;
-  name: string;
-  balance: number;
-  type: 'debit' | 'credit' | 'wallet';
-  icon: string;
-  color: string;
-  description?: string;
-  includeInTotal?: boolean;
-  creditLimit?: number;
-};
+import { useData, Account } from '../contexts/DataContext';
 
 const formatCurrency = (amount: number) => {
   return `₱ ${Math.abs(amount).toLocaleString('en-PH', {
@@ -27,66 +16,7 @@ const formatCurrency = (amount: number) => {
 
 export default function Dashboard() {
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
-  const [accounts, setAccounts] = useState<Account[]>([
-    {
-      id: '1',
-      name: 'KOMOs Lorenz',
-      balance: 74980.39,
-      type: 'debit',
-      icon: 'credit-card',
-      color: '#FF4B8C',
-    },
-    {
-      id: '2',
-      name: 'BPI Ana',
-      balance: 16805.94,
-      type: 'debit',
-      icon: 'credit-card',
-      color: '#4CAF50',
-    },
-    {
-      id: '3',
-      name: 'Union Bank Lorenz',
-      balance: 8992.90,
-      type: 'debit',
-      icon: 'credit-card',
-      color: '#4CAF50',
-    },
-    {
-      id: '4',
-      name: 'BDO Ana',
-      balance: 71374.33,
-      type: 'debit',
-      icon: 'bank',
-      color: '#FFD700',
-    },
-    {
-      id: '5',
-      name: 'Wallet Lorenz',
-      balance: 1258,
-      type: 'wallet',
-      icon: 'wallet',
-      color: '#666666',
-    },
-    {
-      id: '6',
-      name: 'UnionBank CC Ana',
-      balance: -19117.77,
-      type: 'credit',
-      icon: 'bank',
-      color: '#5C6BC0',
-      creditLimit: 122882,
-    },
-    {
-      id: '7',
-      name: 'Security Bank CC Lorenz',
-      balance: -30085.37,
-      type: 'credit',
-      icon: 'bank',
-      color: '#FFD700',
-      creditLimit: 169915,
-    },
-  ]);
+  const { accounts, addAccount, updateAccount } = useData();
   
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
@@ -102,16 +32,14 @@ export default function Dashboard() {
   const handleSaveAccount = (accountData: any) => {
     if (accountData.id) {
       // Update existing account
-      setAccounts(accounts.map(acc => 
-        acc.id === accountData.id ? { ...acc, ...accountData } : acc
-      ));
+      updateAccount({ ...accountData });
     } else {
       // Add new account
       const newAccount: Account = {
         ...accountData,
         id: Date.now().toString(),
       };
-      setAccounts([...accounts, newAccount]);
+      addAccount(newAccount);
     }
     
     setShowAccountForm(false);
