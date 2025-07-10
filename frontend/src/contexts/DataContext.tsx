@@ -1,4 +1,8 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { databaseService, SyncableAccount } from '../services/database';
+import { syncService, SyncResult } from '../services/syncService';
+import NetInfo from '@react-native-community/netinfo';
+import { generateObjectId } from '../utils/objectId';
 
 export type Account = {
   id: string;
@@ -25,19 +29,25 @@ export type Category = {
 interface DataContextType {
   accounts: Account[];
   categories: Category[];
+  isOnline: boolean;
+  isSyncing: boolean;
+  lastSyncResult: SyncResult | null;
   setAccounts: (accounts: Account[]) => void;
   setCategories: (categories: Category[]) => void;
   addAccount: (account: Account) => void;
   updateAccount: (account: Account) => void;
+  deleteAccount: (id: string) => void;
   addCategory: (category: Category) => void;
   updateCategory: (category: Category) => void;
+  syncData: () => Promise<void>;
+  refreshData: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 const initialAccounts: Account[] = [
   {
-    id: '1',
+    id: generateObjectId(),
     name: 'KOMOs Lorenz',
     balance: 74980.39,
     type: 'debit',
@@ -45,7 +55,7 @@ const initialAccounts: Account[] = [
     color: '#FF4B8C',
   },
   {
-    id: '2',
+    id: generateObjectId(),
     name: 'BPI Ana',
     balance: 16805.94,
     type: 'debit',
@@ -53,7 +63,7 @@ const initialAccounts: Account[] = [
     color: '#4CAF50',
   },
   {
-    id: '3',
+    id: generateObjectId(),
     name: 'Union Bank Lorenz',
     balance: 8992.90,
     type: 'debit',
@@ -61,7 +71,7 @@ const initialAccounts: Account[] = [
     color: '#4CAF50',
   },
   {
-    id: '4',
+    id: generateObjectId(),
     name: 'BDO Ana',
     balance: 71374.33,
     type: 'debit',
@@ -69,7 +79,7 @@ const initialAccounts: Account[] = [
     color: '#FFD700',
   },
   {
-    id: '5',
+    id: generateObjectId(),
     name: 'Wallet Lorenz',
     balance: 1258,
     type: 'wallet',
@@ -77,7 +87,7 @@ const initialAccounts: Account[] = [
     color: '#666666',
   },
   {
-    id: '6',
+    id: generateObjectId(),
     name: 'UnionBank CC Ana',
     balance: -19117.77,
     type: 'credit',
@@ -86,7 +96,7 @@ const initialAccounts: Account[] = [
     creditLimit: 122882,
   },
   {
-    id: '7',
+    id: generateObjectId(),
     name: 'Security Bank CC Lorenz',
     balance: -30085.37,
     type: 'credit',
@@ -198,17 +208,186 @@ const initialCategories: Category[] = [
 ];
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [accounts, setAccounts] = useState<Account[]>(initialAccounts);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
+  const [isOnline, setIsOnline] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
 
-  const addAccount = (account: Account) => {
-    setAccounts(prev => [...prev, account]);
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        await databaseService.initialize();
+        await refreshData();
+        
+        const hasInitialData = await databaseService.getAllAccounts();
+        if (hasInitialData.length === 0) {
+          for (const account of initialAccounts) {
+            const syncableAccount = {
+              ...account,
+              updatedAt: Date.now(),
+              isDeleted: false
+            };
+            await databaseService.saveAccount(syncableAccount);
+          }
+          await refreshData();
+        }
+        
+        await syncService.setAutoSyncEnabled(true);
+      } catch (error) {
+        console.error('Failed to initialize database:', error);
+      }
+    };
+
+    const setupNetworkListener = () => {
+      const unsubscribe = NetInfo.addEventListener(state => {
+        setIsOnline(!!(state.isConnected && state.isInternetReachable));
+      });
+      return unsubscribe;
+    };
+
+    const setupSyncCallback = () => {
+      const callback = (result: SyncResult) => {
+        setLastSyncResult(result);
+        setIsSyncing(false);
+        if (result.success) {
+          refreshData();
+        }
+      };
+      
+      syncService.addSyncCallback(callback);
+      return () => syncService.removeSyncCallback(callback);
+    };
+
+    initializeData();
+    const unsubscribeNetwork = setupNetworkListener();
+    const unsubscribeSync = setupSyncCallback();
+
+    return () => {
+      unsubscribeNetwork();
+      unsubscribeSync();
+      syncService.stopAutoSync();
+    };
+  }, []);
+
+  const refreshData = async () => {
+    try {
+      if (!databaseService.isReady()) {
+        console.log('Database not ready, skipping refresh');
+        return;
+      }
+      
+      const accountsData = await databaseService.getAllAccounts();
+      const mappedAccounts = accountsData.map(account => ({
+        id: account.id,
+        name: account.name,
+        balance: account.balance,
+        type: account.type,
+        icon: account.icon,
+        color: account.color,
+        description: account.description,
+        includeInTotal: account.includeInTotal,
+        creditLimit: account.creditLimit
+      }));
+      
+      setAccounts(mappedAccounts);
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+    }
   };
 
-  const updateAccount = (updatedAccount: Account) => {
-    setAccounts(prev => prev.map(acc => 
-      acc.id === updatedAccount.id ? updatedAccount : acc
-    ));
+  const syncData = async () => {
+    if (isSyncing) return;
+    
+    setIsSyncing(true);
+    try {
+      const result = await syncService.sync();
+      setLastSyncResult(result);
+      if (result.success) {
+        await refreshData();
+      }
+    } catch (error) {
+      console.error('Sync failed:', error);
+      setLastSyncResult({ success: false, error: (error as Error).message });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const addAccount = async (account: Account) => {
+    try {
+      if (!databaseService.isReady()) {
+        await databaseService.initialize();
+      }
+      
+      const syncableAccount = {
+        ...account,
+        updatedAt: Date.now(),
+        isDeleted: false
+      };
+      
+      await databaseService.saveAccount(syncableAccount);
+      await refreshData();
+      
+      if (isOnline) {
+        syncData();
+      }
+    } catch (error) {
+      console.error('Failed to add account:', error);
+    }
+  };
+
+  const updateAccount = async (updatedAccount: Account) => {
+    try {
+      if (!databaseService.isReady()) {
+        console.error('Database not ready');
+        return;
+      }
+      
+      // Get the existing account to preserve serverUpdatedAt if it exists
+      const existingAccount = await databaseService.getAccountById(updatedAccount.id);
+      
+      // Create a timestamp that's guaranteed to be newer than any existing timestamp
+      const now = Date.now();
+      
+      await databaseService.saveAccount({
+        ...updatedAccount,
+        // Ensure timestamp is newer than any previous one
+        updatedAt: now + 1,
+        // Preserve server timestamp if it exists
+        serverUpdatedAt: existingAccount?.serverUpdatedAt,
+        isDeleted: false
+      });
+      
+      console.log(`Account updated: ${updatedAccount.name} with timestamp ${now + 1}`);
+      
+      await refreshData();
+      
+      if (isOnline) {
+        // Add a small delay to ensure the update is saved before syncing
+        setTimeout(() => syncData(), 100);
+      }
+    } catch (error) {
+      console.error('Failed to update account:', error);
+    }
+  };
+
+  const deleteAccount = async (id: string) => {
+    try {
+      if (!databaseService.isReady()) {
+        console.error('Database not ready');
+        return;
+      }
+      
+      await databaseService.deleteAccount(id);
+      await refreshData();
+      
+      if (isOnline) {
+        syncData();
+      }
+    } catch (error) {
+      console.error('Failed to delete account:', error);
+    }
   };
 
   const addCategory = (category: Category) => {
@@ -225,12 +404,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <DataContext.Provider value={{
       accounts,
       categories,
+      isOnline,
+      isSyncing,
+      lastSyncResult,
       setAccounts,
       setCategories,
       addAccount,
       updateAccount,
+      deleteAccount,
       addCategory,
       updateCategory,
+      syncData,
+      refreshData
     }}>
       {children}
     </DataContext.Provider>

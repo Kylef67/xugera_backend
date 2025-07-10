@@ -173,4 +173,85 @@ export default {
       res.status(500).json({ error: (err as Error).message });
     }
   },
+  syncPull: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { lastSyncTimestamp } = req.body;
+      const timestamp = lastSyncTimestamp || 0;
+      
+      const accounts = await Account.find({
+        updatedAt: { $gt: timestamp }
+      }).sort({ updatedAt: 1 });
+      
+      res.json({
+        accounts: accounts.map(account => ({
+          id: account._id,
+          name: account.name,
+          description: account.description,
+          balance: account.balance,
+          type: account.type,
+          icon: account.icon,
+          color: account.color,
+          includeInTotal: account.includeInTotal,
+          creditLimit: account.creditLimit,
+          updatedAt: account.updatedAt,
+          isDeleted: account.isDeleted
+        })),
+        timestamp: Date.now()
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  },
+  syncPush: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { accounts } = req.body;
+      const timestamp = Date.now();
+      
+      for (const accountData of accounts) {
+        // Check if ID is a valid ObjectId format (24 character hex string)
+        const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(accountData.id);
+        
+        if (!isValidObjectId) {
+          // Skip accounts with invalid ObjectId format to prevent casting errors
+          console.warn(`Skipping account with invalid ObjectId: ${accountData.id}`);
+          continue;
+        }
+        
+        if (accountData.isDeleted) {
+          await Account.findByIdAndUpdate(
+            accountData.id,
+            { 
+              isDeleted: true,
+              updatedAt: timestamp
+            },
+            { new: true, upsert: true }
+          );
+        } else {
+          await Account.findByIdAndUpdate(
+            accountData.id,
+            {
+              name: accountData.name,
+              description: accountData.description,
+              balance: accountData.balance,
+              type: accountData.type,
+              icon: accountData.icon,
+              color: accountData.color,
+              includeInTotal: accountData.includeInTotal,
+              creditLimit: accountData.creditLimit,
+              updatedAt: timestamp,
+              isDeleted: false
+            },
+            { new: true, upsert: true }
+          );
+        }
+      }
+      
+      res.json({
+        message: 'Sync completed successfully',
+        timestamp
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  },
 };

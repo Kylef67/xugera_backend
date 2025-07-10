@@ -6,8 +6,15 @@ import Account from '../account';
 interface IAccountDocument extends mongoose.Document {
   name: string;
   description: string;
+  balance?: number;
+  type?: string;
+  icon?: string;
+  color?: string;
+  includeInTotal?: boolean;
+  creditLimit?: number;
+  updatedAt: number;
+  isDeleted?: boolean;
   createdAt: Date;
-  updatedAt: Date;
 }
 
 describe('Account Model', () => {
@@ -40,6 +47,12 @@ describe('Account Model', () => {
     expect(savedAccount._id).toBeDefined();
     expect(savedAccount.name).toBe(accountData.name);
     expect(savedAccount.description).toBe(accountData.description);
+    expect(savedAccount.balance).toBe(0);
+    expect(savedAccount.type).toBe('debit');
+    expect(savedAccount.icon).toBe('bank');
+    expect(savedAccount.color).toBe('#007AFF');
+    expect(savedAccount.includeInTotal).toBe(true);
+    expect(savedAccount.isDeleted).toBe(false);
     expect(savedAccount.createdAt).toBeDefined();
     expect(savedAccount.updatedAt).toBeDefined();
   });
@@ -95,5 +108,52 @@ describe('Account Model', () => {
     const deletedAccount = await Account.findById(savedAccount._id);
 
     expect(deletedAccount).toBeNull();
+  });
+
+  it('should create an account with sync fields', async () => {
+    const accountData = {
+      name: 'Sync Test Account',
+      description: 'Test Description',
+      balance: 1000,
+      type: 'credit',
+      icon: 'credit-card',
+      color: '#FF0000',
+      includeInTotal: false,
+      creditLimit: 5000,
+      updatedAt: Date.now(),
+      isDeleted: false
+    };
+    const account = new Account(accountData);
+
+    const savedAccount = await account.save() as IAccountDocument;
+
+    expect(savedAccount._id).toBeDefined();
+    expect(savedAccount.name).toBe(accountData.name);
+    expect(savedAccount.description).toBe(accountData.description);
+    expect(savedAccount.balance).toBe(accountData.balance);
+    expect(savedAccount.type).toBe(accountData.type);
+    expect(savedAccount.icon).toBe(accountData.icon);
+    expect(savedAccount.color).toBe(accountData.color);
+    expect(savedAccount.includeInTotal).toBe(accountData.includeInTotal);
+    expect(savedAccount.creditLimit).toBe(accountData.creditLimit);
+    expect(savedAccount.updatedAt).toBe(accountData.updatedAt);
+    expect(savedAccount.isDeleted).toBe(accountData.isDeleted);
+  });
+
+  it('should soft delete an account', async () => {
+    const account = new Account({
+      name: 'Test Account',
+      description: 'Test Description'
+    });
+    const savedAccount = await account.save();
+    
+    const updatedAccount = await Account.findByIdAndUpdate(
+      savedAccount._id,
+      { isDeleted: true, updatedAt: Date.now() },
+      { new: true }
+    );
+
+    expect(updatedAccount).toBeDefined();
+    expect(updatedAccount?.isDeleted).toBe(true);
   });
 }); 

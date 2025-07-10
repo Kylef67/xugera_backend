@@ -6,6 +6,7 @@ import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import AddAccountDrawer from '../components/AddAccountDrawer';
 import AccountForm from './AccountForm';
 import { useData, Account } from '../contexts/DataContext';
+import { generateObjectId } from '../utils/objectId';
 
 const formatCurrency = (amount: number) => {
   return `₱ ${Math.abs(amount).toLocaleString('en-PH', {
@@ -16,7 +17,7 @@ const formatCurrency = (amount: number) => {
 
 export default function Dashboard() {
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
-  const { accounts, addAccount, updateAccount } = useData();
+  const { accounts, addAccount, updateAccount, deleteAccount, isOnline, isSyncing, lastSyncResult, syncData } = useData();
   
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
@@ -37,7 +38,7 @@ export default function Dashboard() {
       // Add new account
       const newAccount: Account = {
         ...accountData,
-        id: Date.now().toString(),
+        id: generateObjectId(),
       };
       addAccount(newAccount);
     }
@@ -73,10 +74,34 @@ export default function Dashboard() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>All accounts</Text>
           <Text style={styles.headerBalance}>₱ {totalBalance.toLocaleString('en-PH')}</Text>
+          <View style={styles.syncStatusContainer}>
+            <MaterialCommunityIcons 
+              name={isOnline ? "wifi" : "wifi-off"} 
+              size={16} 
+              color={isOnline ? "#4CAF50" : "#FF4B8C"} 
+            />
+            <Text style={[styles.syncStatus, { color: isOnline ? "#4CAF50" : "#FF4B8C" }]}>
+              {isOnline ? "Online" : "Offline"}
+            </Text>
+            {isSyncing && <MaterialCommunityIcons name="sync" size={16} color="#6B8AFE" />}
+          </View>
         </View>
-        <TouchableOpacity style={styles.addButton} onPress={handlePresentModal}>
-          <MaterialCommunityIcons name="plus" size={28} color="#8E8E93" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.syncButton} 
+            onPress={syncData}
+            disabled={!isOnline || isSyncing}
+          >
+            <MaterialCommunityIcons 
+              name={isSyncing ? "sync" : "sync"} 
+              size={24} 
+              color={!isOnline || isSyncing ? "#8E8E93" : "#6B8AFE"} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={handlePresentModal}>
+            <MaterialCommunityIcons name="plus" size={28} color="#8E8E93" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={[styles.tabBar, { justifyContent: 'center' }]}>
@@ -150,6 +175,17 @@ export default function Dashboard() {
           ))}
         </View>
       </ScrollView>
+      
+      {lastSyncResult && (
+        <View style={[styles.syncResult, { backgroundColor: lastSyncResult.success ? '#4CAF50' : '#FF4B8C' }]}>
+          <Text style={styles.syncResultText}>
+            {lastSyncResult.success 
+              ? `Synced successfully. ${lastSyncResult.pulledCount || 0} pulled, ${lastSyncResult.pushedCount || 0} pushed.`
+              : `Sync failed: ${lastSyncResult.error}`
+            }
+          </Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -191,6 +227,27 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  syncStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  syncStatus: {
+    fontSize: 12,
+    marginLeft: 4,
+    marginRight: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  syncButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   tabBar: {
     flexDirection: 'row',
@@ -287,5 +344,18 @@ const styles = StyleSheet.create({
   creditLimit: {
     color: '#8E8E93',
     fontSize: 14,
+  },
+  syncResult: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 12,
+    alignItems: 'center',
+  },
+  syncResultText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
   },
 }); 

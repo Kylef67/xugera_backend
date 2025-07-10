@@ -8,3 +8,10 @@ dist
 backend/node_modules
 frontend/node_modules
 frontend/.expo/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
