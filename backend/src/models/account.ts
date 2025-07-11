@@ -9,6 +9,7 @@ interface IAccount extends Document {
     color?: string;
     includeInTotal?: boolean;
     creditLimit?: number;
+    order?: number;
     updatedAt: number;
     isDeleted?: boolean;
 }
@@ -22,6 +23,7 @@ const accountSchema: Schema = new mongoose.Schema({
     color: { type: String, default: '#007AFF' },
     includeInTotal: { type: Boolean, default: true },
     creditLimit: { type: Number },
+    order: { type: Number, default: 0 },
     updatedAt: { type: Number, default: Date.now },
     isDeleted: { type: Boolean, default: false }
 }, { timestamps: true });

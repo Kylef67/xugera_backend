@@ -8,6 +8,7 @@ export interface SyncableAccount extends Account {
   updatedAt: number;
   serverUpdatedAt?: number;
   isDeleted?: boolean;
+  order?: number; // Added for ordering
 }
 
 interface DatabaseInterface {
@@ -22,6 +23,8 @@ interface DatabaseInterface {
   getLastSyncTimestamp(): Promise<number>;
   setLastSyncTimestamp(timestamp: number): Promise<void>;
   clearAllData(): Promise<void>;
+  updateAccountOrder(accountId: string, newOrder: number): Promise<void>;
+  updateAccountsOrder(reorderedAccounts: {id: string, order: number}[]): Promise<void>;
 }
 
 class AsyncStorageDatabaseService implements DatabaseInterface {
@@ -33,8 +36,45 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
     this.isInitialized = true;
     // Run migration to fix invalid ObjectIds
     await this.migrateInvalidObjectIds();
+    // Initialize account orders if needed
+    await this.initializeAccountOrders();
   }
   
+  private async initializeAccountOrders(): Promise<void> {
+    try {
+      const accountsJson = await AsyncStorage.getItem(this.ACCOUNTS_KEY);
+      if (!accountsJson) return;
+      
+      const accounts = JSON.parse(accountsJson) as SyncableAccount[];
+      let needsUpdate = false;
+      
+      // Check if any accounts are missing the order field
+      const accountsMissingOrder = accounts.some(account => account.order === undefined);
+      
+      if (accountsMissingOrder) {
+        // Sort accounts by updatedAt to maintain consistent ordering
+        const sortedAccounts = [...accounts].sort((a, b) => b.updatedAt - a.updatedAt);
+        
+        // Assign order values
+        for (let i = 0; i < sortedAccounts.length; i++) {
+          const account = sortedAccounts[i];
+          const originalIndex = accounts.findIndex(a => a.id === account.id);
+          if (originalIndex !== -1) {
+            accounts[originalIndex].order = i;
+            needsUpdate = true;
+          }
+        }
+        
+        if (needsUpdate) {
+          await AsyncStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts));
+          console.log('Migration completed: Account orders have been initialized');
+        }
+      }
+    } catch (error) {
+      console.error('Error during account order initialization:', error);
+    }
+  }
+
   private async migrateInvalidObjectIds(): Promise<void> {
     try {
       const accountsJson = await AsyncStorage.getItem(this.ACCOUNTS_KEY);
@@ -76,9 +116,32 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
       
       const accounts = JSON.parse(accountsJson) as SyncableAccount[];
       if (includeDeleted) {
-        return accounts.sort((a, b) => b.updatedAt - a.updatedAt);
+        // Sort by order first, then by updatedAt as a fallback
+        return accounts.sort((a, b) => {
+          // If both have order, sort by order
+          if (a.order !== undefined && b.order !== undefined) {
+            return a.order - b.order;
+          }
+          // If only one has order, prioritize the one with order
+          if (a.order !== undefined) return -1;
+          if (b.order !== undefined) return 1;
+          // Default sort by updatedAt
+          return b.updatedAt - a.updatedAt;
+        });
       }
-      return accounts.filter(account => !account.isDeleted).sort((a, b) => b.updatedAt - a.updatedAt);
+      return accounts
+        .filter(account => !account.isDeleted)
+        .sort((a, b) => {
+          // If both have order, sort by order
+          if (a.order !== undefined && b.order !== undefined) {
+            return a.order - b.order;
+          }
+          // If only one has order, prioritize the one with order
+          if (a.order !== undefined) return -1;
+          if (b.order !== undefined) return 1;
+          // Default sort by updatedAt
+          return b.updatedAt - a.updatedAt;
+        });
     } catch (error) {
       console.error('Error getting accounts from AsyncStorage:', error);
       return [];
@@ -184,6 +247,55 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
     }
   }
 
+  async updateAccountOrder(accountId: string, newOrder: number): Promise<void> {
+    try {
+      const accountsJson = await AsyncStorage.getItem(this.ACCOUNTS_KEY);
+      if (!accountsJson) return;
+      
+      const accounts = JSON.parse(accountsJson) as SyncableAccount[];
+      const accountIndex = accounts.findIndex(a => a.id === accountId);
+      
+      if (accountIndex >= 0) {
+        accounts[accountIndex].order = newOrder;
+        accounts[accountIndex].updatedAt = Date.now();
+        await AsyncStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts));
+        console.log(`Account ${accountId} order updated to ${newOrder}`);
+      }
+    } catch (error) {
+      console.error('Error updating account order:', error);
+      throw error;
+    }
+  }
+
+  async updateAccountsOrder(reorderedAccounts: {id: string, order: number}[]): Promise<void> {
+    try {
+      const accountsJson = await AsyncStorage.getItem(this.ACCOUNTS_KEY);
+      if (!accountsJson) return;
+      
+      const accounts = JSON.parse(accountsJson) as SyncableAccount[];
+      const now = Date.now();
+      
+      // Update order for each account in the reordered list
+      let updated = false;
+      for (const { id, order } of reorderedAccounts) {
+        const accountIndex = accounts.findIndex(a => a.id === id);
+        if (accountIndex >= 0) {
+          accounts[accountIndex].order = order;
+          accounts[accountIndex].updatedAt = now;
+          updated = true;
+        }
+      }
+      
+      if (updated) {
+        await AsyncStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts));
+        console.log(`Updated order for ${reorderedAccounts.length} accounts`);
+      }
+    } catch (error) {
+      console.error('Error updating accounts order:', error);
+      throw error;
+    }
+  }
+
   async getLastSyncTimestamp(): Promise<number> {
     try {
       const metadataJson = await AsyncStorage.getItem(this.SYNC_METADATA_KEY);
@@ -243,7 +355,8 @@ class SQLiteDatabaseService implements DatabaseInterface {
         creditLimit REAL,
         updatedAt INTEGER NOT NULL,
         serverUpdatedAt INTEGER,
-        isDeleted INTEGER DEFAULT 0
+        isDeleted INTEGER DEFAULT 0,
+        "order" INTEGER
       );
     `);
 
@@ -255,10 +368,55 @@ class SQLiteDatabaseService implements DatabaseInterface {
     `);
     
     this.isInitialized = true;
-    // Run migration to fix invalid ObjectIds
+    
+    // Run migrations
+    await this.migrateAddOrderColumn();
     await this.migrateInvalidObjectIds();
   }
   
+  private async migrateAddOrderColumn(): Promise<void> {
+    try {
+      if (!this.isReady()) return;
+      
+      // Check if the order column exists
+      const tableInfo = await this.db!.getAllAsync("PRAGMA table_info(accounts)");
+      const hasOrderColumn = tableInfo.some((column: any) => column.name === 'order');
+      
+      if (!hasOrderColumn) {
+        // Add the order column if it doesn't exist
+        await this.db!.execAsync(`ALTER TABLE accounts ADD COLUMN "order" INTEGER;`);
+        console.log('Migration: Added "order" column to accounts table');
+        
+        // Set initial order based on current sorting (updatedAt)
+        const accounts = await this.getAllAccounts();
+        
+        // Use transaction for better performance
+        await this.db!.execAsync('BEGIN TRANSACTION');
+        
+        try {
+          // Use a for loop instead of forEach for proper async handling
+          for (let i = 0; i < accounts.length; i++) {
+            await this.db!.runAsync(
+              `UPDATE accounts SET "order" = ? WHERE id = ?`,
+              [i, accounts[i].id]
+            );
+          }
+          
+          await this.db!.execAsync('COMMIT');
+          console.log('Migration: Set initial order values for accounts');
+        } catch (error) {
+          await this.db!.execAsync('ROLLBACK');
+          console.error('Error during order column migration transaction:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error during order column migration:', error);
+      if (this.db) {
+        await this.db.execAsync('ROLLBACK').catch(e => console.error('Error rolling back transaction:', e));
+      }
+    }
+  }
+
   private async migrateInvalidObjectIds(): Promise<void> {
     try {
       if (!this.isReady()) return;
@@ -296,28 +454,38 @@ class SQLiteDatabaseService implements DatabaseInterface {
   async getAllAccounts(includeDeleted: boolean = false): Promise<SyncableAccount[]> {
     if (!this.isReady()) throw new Error('Database not initialized');
     
-    let query = 'SELECT * FROM accounts';
-    if (!includeDeleted) {
-      query += ' WHERE isDeleted = 0';
+    try {
+      let query = `
+        SELECT * FROM accounts
+      `;
+      
+      if (!includeDeleted) {
+        query += ` WHERE isDeleted = 0`;
+      }
+      
+      query += ` ORDER BY "order" ASC, updatedAt DESC`;
+      
+      const result = await this.db!.getAllAsync<any>(query);
+      
+      return result.map(row => ({
+        id: row.id,
+        name: row.name,
+        balance: row.balance,
+        type: row.type,
+        icon: row.icon,
+        color: row.color,
+        description: row.description,
+        includeInTotal: Boolean(row.includeInTotal),
+        creditLimit: row.creditLimit,
+        order: row.order,
+        updatedAt: row.updatedAt,
+        serverUpdatedAt: row.serverUpdatedAt,
+        isDeleted: Boolean(row.isDeleted)
+      }));
+    } catch (error) {
+      console.error('Error getting accounts from SQLite:', error);
+      return [];
     }
-    query += ' ORDER BY updatedAt DESC';
-    
-    const result = await this.db!.getAllAsync(query) as any[];
-    
-    return result.map((row: any) => ({
-      id: row.id as string,
-      name: row.name as string,
-      balance: row.balance as number,
-      type: row.type as 'debit' | 'credit' | 'wallet',
-      icon: row.icon as string,
-      color: row.color as string,
-      description: row.description as string,
-      includeInTotal: Boolean(row.includeInTotal),
-      creditLimit: row.creditLimit as number,
-      updatedAt: row.updatedAt as number,
-      serverUpdatedAt: row.serverUpdatedAt as number,
-      isDeleted: Boolean(row.isDeleted)
-    }));
   }
 
   async getAccountById(id: string): Promise<SyncableAccount | null> {
@@ -340,6 +508,7 @@ class SQLiteDatabaseService implements DatabaseInterface {
       description: result.description as string,
       includeInTotal: Boolean(result.includeInTotal),
       creditLimit: result.creditLimit as number,
+      order: result.order as number,
       updatedAt: result.updatedAt as number,
       serverUpdatedAt: result.serverUpdatedAt as number,
       isDeleted: Boolean(result.isDeleted)
@@ -371,8 +540,8 @@ class SQLiteDatabaseService implements DatabaseInterface {
     await this.db!.runAsync(`
       INSERT OR REPLACE INTO accounts (
         id, name, balance, type, icon, color, description, 
-        includeInTotal, creditLimit, updatedAt, serverUpdatedAt, isDeleted
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        includeInTotal, creditLimit, updatedAt, serverUpdatedAt, isDeleted, "order"
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       accountWithTimestamp.id,
       accountWithTimestamp.name,
@@ -385,7 +554,8 @@ class SQLiteDatabaseService implements DatabaseInterface {
       accountWithTimestamp.creditLimit || null,
       accountWithTimestamp.updatedAt,
       accountWithTimestamp.serverUpdatedAt || null,
-      accountWithTimestamp.isDeleted ? 1 : 0
+      accountWithTimestamp.isDeleted ? 1 : 0,
+      accountWithTimestamp.order || null
     ]);
     
     console.log(`SQLite: Account saved with name: ${account.name}, updatedAt: ${accountWithTimestamp.updatedAt}, serverUpdatedAt: ${accountWithTimestamp.serverUpdatedAt || 'none'}`);
@@ -420,6 +590,7 @@ class SQLiteDatabaseService implements DatabaseInterface {
       description: row.description as string,
       includeInTotal: Boolean(row.includeInTotal),
       creditLimit: row.creditLimit as number,
+      order: row.order as number,
       updatedAt: row.updatedAt as number,
       serverUpdatedAt: row.serverUpdatedAt as number,
       isDeleted: Boolean(row.isDeleted)
@@ -433,6 +604,49 @@ class SQLiteDatabaseService implements DatabaseInterface {
       'UPDATE accounts SET serverUpdatedAt = ? WHERE id = ?',
       [serverUpdatedAt, id]
     );
+  }
+
+  async updateAccountOrder(accountId: string, newOrder: number): Promise<void> {
+    if (!this.isReady()) throw new Error('Database not initialized');
+    
+    try {
+      const now = Date.now();
+      await this.db!.runAsync(
+        `UPDATE accounts SET "order" = ?, updatedAt = ? WHERE id = ?`,
+        [newOrder, now, accountId]
+      );
+      console.log(`Account ${accountId} order updated to ${newOrder}`);
+    } catch (error) {
+      console.error('Error updating account order:', error);
+      throw error;
+    }
+  }
+
+  async updateAccountsOrder(reorderedAccounts: {id: string, order: number}[]): Promise<void> {
+    if (!this.db || reorderedAccounts.length === 0) return;
+    
+    try {
+      // Use the correct transaction method
+      await this.db.execAsync('BEGIN TRANSACTION');
+      
+      const now = Date.now();
+      for (const { id, order } of reorderedAccounts) {
+        await this.db.runAsync(
+          `UPDATE accounts SET "order" = ?, updatedAt = ? WHERE id = ?`,
+          [order, now, id]
+        );
+      }
+      
+      await this.db.execAsync('COMMIT');
+      console.log(`Updated order for ${reorderedAccounts.length} accounts`);
+    } catch (error) {
+      // Rollback on error
+      if (this.db) {
+        await this.db.execAsync('ROLLBACK');
+      }
+      console.error('Error updating accounts order:', error);
+      throw error;
+    }
   }
 
   async getLastSyncTimestamp(): Promise<number> {

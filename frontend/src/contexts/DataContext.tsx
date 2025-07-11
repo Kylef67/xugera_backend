@@ -14,6 +14,7 @@ export type Account = {
   description?: string;
   includeInTotal?: boolean;
   creditLimit?: number;
+  order?: number;
 };
 
 export type Category = {
@@ -37,6 +38,7 @@ interface DataContextType {
   addAccount: (account: Account) => void;
   updateAccount: (account: Account) => void;
   deleteAccount: (id: string) => void;
+  reorderAccounts: (reorderedAccounts: Account[]) => void;
   addCategory: (category: Category) => void;
   updateCategory: (category: Category) => void;
   syncData: (force?: boolean) => Promise<SyncResult>;
@@ -290,7 +292,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         color: account.color,
         description: account.description,
         includeInTotal: account.includeInTotal,
-        creditLimit: account.creditLimit
+        creditLimit: account.creditLimit,
+        order: account.order
       }));
       
       setAccounts(mappedAccounts);
@@ -396,6 +399,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const reorderAccounts = async (reorderedAccounts: Account[]) => {
+    try {
+      // Update the local state with the new order
+      setAccounts(reorderedAccounts);
+      
+      // Prepare the order updates for the database
+      const orderUpdates = reorderedAccounts.map((account, index) => ({
+        id: account.id,
+        order: index
+      }));
+      
+      // Update the database with the new order
+      await databaseService.updateAccountsOrder(orderUpdates);
+      
+      // Sync the changes if online
+      if (isOnline) {
+        await syncData();
+      }
+    } catch (error) {
+      console.error('Error reordering accounts:', error);
+    }
+  };
+
   const addCategory = (category: Category) => {
     setCategories(prev => [...prev, category]);
   };
@@ -407,22 +433,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <DataContext.Provider value={{
-      accounts,
-      categories,
-      isOnline,
-      isSyncing,
-      lastSyncResult,
-      setAccounts,
-      setCategories,
-      addAccount,
-      updateAccount,
-      deleteAccount,
-      addCategory,
-      updateCategory,
-      syncData,
-      refreshData
-    }}>
+    <DataContext.Provider
+      value={{
+        accounts,
+        categories,
+        isOnline,
+        isSyncing,
+        lastSyncResult,
+        setAccounts,
+        setCategories,
+        addAccount,
+        updateAccount,
+        deleteAccount,
+        reorderAccounts,
+        addCategory,
+        updateCategory,
+        syncData,
+        refreshData,
+      }}
+    >
       {children}
     </DataContext.Provider>
   );

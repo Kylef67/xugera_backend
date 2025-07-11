@@ -15,6 +15,7 @@ function generateAccountHash(account: any): string {
     color: account.color,
     includeInTotal: account.includeInTotal,
     creditLimit: account.creditLimit,
+    order: account.order,
     isDeleted: account.isDeleted
   };
   
@@ -100,8 +101,8 @@ export default {
         dateFilter.$lte = toDateObj;
       }
       
-      // Get all accounts
-      const accounts = await Account.find({ isDeleted: false });
+      // Get all accounts sorted by order
+      const accounts = await Account.find({ isDeleted: false }).sort({ order: 1 });
       
       // Calculate balances for each account
       const accountsWithBalances = await Promise.all(
@@ -214,6 +215,7 @@ export default {
           color: account.color,
           includeInTotal: account.includeInTotal,
           creditLimit: account.creditLimit,
+          order: account.order, // Include order field
           updatedAt: account.updatedAt,
           isDeleted: account.isDeleted,
           hash: generateAccountHash(account) // Include hash for future comparisons
@@ -259,6 +261,7 @@ export default {
             color: accountData.color,
             includeInTotal: accountData.includeInTotal,
             creditLimit: accountData.creditLimit,
+            order: accountData.order, // Include order field
             updatedAt: accountData.updatedAt,
             isDeleted: accountData.isDeleted
           });
@@ -288,6 +291,7 @@ export default {
           existingAccount.color = accountData.color;
           existingAccount.includeInTotal = accountData.includeInTotal;
           existingAccount.creditLimit = accountData.creditLimit;
+          existingAccount.order = accountData.order; // Include order field
           existingAccount.updatedAt = accountData.updatedAt;
           existingAccount.isDeleted = accountData.isDeleted;
           
@@ -311,6 +315,39 @@ export default {
         success: false,
         error: (error as Error).message
       });
+    }
+  },
+  
+  // Add a new method to update account order
+  updateOrder: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { accounts } = req.body;
+      
+      if (!Array.isArray(accounts)) {
+        res.status(400).json({ error: 'Accounts must be an array' });
+        return;
+      }
+      
+      // Update the order of each account
+      const updatePromises = accounts.map(async (item) => {
+        if (!item.id || typeof item.order !== 'number') {
+          return Promise.reject(new Error('Each account must have an id and order'));
+        }
+        
+        return Account.findByIdAndUpdate(item.id, { 
+          order: item.order,
+          updatedAt: Date.now()
+        });
+      });
+      
+      await Promise.all(updatePromises);
+      
+      res.json({ 
+        success: true, 
+        message: translate('accounts.order_updated', req.lang) 
+      });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
     }
   }
 };

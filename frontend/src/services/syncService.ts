@@ -19,6 +19,7 @@ export interface ServerAccount {
   color?: string;
   includeInTotal?: boolean;
   creditLimit?: number;
+  order?: number; // Added order field
   updatedAt: number;
   isDeleted?: boolean;
   hash?: string; // Added hash for efficient change detection
@@ -35,6 +36,7 @@ const generateAccountHash = (account: SyncableAccount): string => {
     color: account.color,
     includeInTotal: account.includeInTotal,
     creditLimit: account.creditLimit,
+    order: account.order,  // Include order in hash calculation
     isDeleted: account.isDeleted
   };
   return btoa(JSON.stringify(accountData));
@@ -151,6 +153,8 @@ class SyncService {
               description: serverAccount.description,
               includeInTotal: serverAccount.includeInTotal !== false,
               creditLimit: serverAccount.creditLimit,
+              // Preserve the local order if it exists, otherwise use server order
+              order: localAccount?.order ?? serverAccount.order,
               updatedAt: serverAccount.updatedAt,
               serverUpdatedAt: serverAccount.updatedAt,
               isDeleted: serverAccount.isDeleted || false
@@ -222,6 +226,7 @@ class SyncService {
           color: account.color,
           includeInTotal: account.includeInTotal,
           creditLimit: account.creditLimit,
+          order: account.order, // Include order field
           updatedAt: account.updatedAt,
           isDeleted: account.isDeleted,
           hash: generateAccountHash(account)

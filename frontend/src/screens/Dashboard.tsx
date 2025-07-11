@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
@@ -7,23 +7,31 @@ import AddAccountDrawer from '../components/AddAccountDrawer';
 import AccountForm from './AccountForm';
 import { useData, Account } from '../contexts/DataContext';
 import { generateObjectId } from '../utils/objectId';
-
-const formatCurrency = (amount: number) => {
-  return `₱ ${Math.abs(amount).toLocaleString('en-PH', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
+import DraggableAccountList from '../components/DraggableAccountList';
+import { formatCurrency } from '../utils/formatters';
 
 export default function Dashboard() {
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
-  const { accounts, addAccount, updateAccount, deleteAccount, isOnline, isSyncing, lastSyncResult, syncData } = useData();
+  const { 
+    accounts, 
+    addAccount, 
+    updateAccount, 
+    deleteAccount, 
+    reorderAccounts,
+    isOnline, 
+    isSyncing, 
+    lastSyncResult, 
+    syncData 
+  } = useData();
   
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
-  const totalBalance = accounts.reduce((sum, account) => sum + account.balance, 0);
-  const positiveAccounts = accounts.filter(account => account.balance >= 0);
-  const negativeAccounts = accounts.filter(account => account.balance < 0);
+  const totalBalance = accounts.reduce((sum, account) => {
+    if (account.includeInTotal !== false) {
+      return sum + account.balance;
+    }
+    return sum;
+  }, 0);
 
   const handlePresentModal = () => {
     setSelectedAccount(null);
@@ -50,6 +58,10 @@ export default function Dashboard() {
   const handleEditAccount = (account: Account) => {
     setSelectedAccount(account);
     setShowAccountForm(true);
+  };
+
+  const handleReorderAccounts = (reorderedAccounts: Account[]) => {
+    reorderAccounts(reorderedAccounts);
   };
 
   if (showAccountForm) {
@@ -89,7 +101,7 @@ export default function Dashboard() {
         <View style={styles.headerActions}>
           <TouchableOpacity 
             style={styles.syncButton} 
-            onPress={syncData}
+            onPress={() => syncData(true)}
             disabled={!isOnline || isSyncing}
           >
             <MaterialCommunityIcons 
@@ -115,66 +127,19 @@ export default function Dashboard() {
         </Pressable>
       </View>
 
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.header}>
-          <Text style={styles.sectionTitle}>Accounts</Text>
-          <Text style={styles.totalAmount}>₱ {totalBalance.toLocaleString('en-PH', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}</Text>
-        </View>
+      <View style={styles.header}>
+        <Text style={styles.sectionTitle}>Accounts</Text>
+        <Text style={styles.totalAmount}>
+          {formatCurrency(totalBalance)}
+        </Text>
+      </View>
 
-        <View style={styles.accountsContainer}>
-          {positiveAccounts.map(account => (
-            <TouchableOpacity 
-              key={account.id} 
-              style={styles.accountCard}
-              onPress={() => handleEditAccount(account)}
-            >
-              <View style={[styles.iconContainer, { backgroundColor: account.color }]}>
-                <MaterialCommunityIcons
-                  name={account.icon as any}
-                  size={24}
-                  color="white"
-                />
-              </View>
-              <View style={styles.accountInfo}>
-                <Text style={styles.accountName}>{account.name}</Text>
-                <Text style={styles.accountBalance}>
-                  {formatCurrency(account.balance)}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-
-          {negativeAccounts.map(account => (
-            <TouchableOpacity 
-              key={account.id} 
-              style={styles.accountCard}
-              onPress={() => handleEditAccount(account)}
-            >
-              <View style={[styles.iconContainer, { backgroundColor: account.color }]}>
-                <MaterialCommunityIcons
-                  name={account.icon as any}
-                  size={24}
-                  color="white"
-                />
-              </View>
-              <View style={styles.accountInfo}>
-                <Text style={styles.accountName}>{account.name}</Text>
-                <View style={styles.creditCardInfo}>
-                  <Text style={styles.negativeBalance}>
-                    -{formatCurrency(account.balance)}
-                  </Text>
-                  <Text style={styles.creditLimit}>
-                    ₱ {account.creditLimit?.toLocaleString('en-PH')}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </ScrollView>
+      <View style={styles.accountsContainer}>
+        <DraggableAccountList 
+          accounts={accounts} 
+          onReorder={handleReorderAccounts} 
+        />
+      </View>
       
       {lastSyncResult && (
         <View style={[styles.syncResult, { backgroundColor: lastSyncResult.success ? '#4CAF50' : '#FF4B8C' }]}>
@@ -261,101 +226,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 16,
-    marginRight: 16,
-    opacity: 0.7,
+    borderRadius: 8,
   },
   tabActive: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 16,
-    marginRight: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: '#6B8AFE',
+    borderRadius: 8,
+    backgroundColor: 'rgba(107, 138, 254, 0.1)',
   },
   tabText: {
     color: '#8E8E93',
     marginLeft: 8,
-    fontSize: 16,
   },
   tabTextActive: {
     color: '#6B8AFE',
     marginLeft: 8,
-    fontSize: 16,
-  },
-  scrollView: {
-    flex: 1,
   },
   header: {
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  totalAmount: {
-    fontSize: 24,
-    color: '#4CAF50',
-    fontWeight: 'bold',
-  },
-  accountsContainer: {
-    padding: 16,
-  },
-  accountCard: {
-    flexDirection: 'row',
-    backgroundColor: '#2C2C2E',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    alignItems: 'center',
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  accountInfo: {
-    flex: 1,
-  },
-  accountName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  accountBalance: {
-    color: '#4CAF50',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  negativeBalance: {
-    color: '#FF4B8C',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  creditCardInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
-  creditLimit: {
-    color: '#8E8E93',
-    fontSize: 14,
+  sectionTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  totalAmount: {
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  accountsContainer: {
+    flex: 1,
   },
   syncResult: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     padding: 12,
     alignItems: 'center',
   },
   syncResultText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: 'white',
     fontWeight: '500',
   },
 }); 
