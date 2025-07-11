@@ -20,8 +20,8 @@ type AccountFormProps = {
 };
 
 const accountTypes = [
-  { id: 'debit', name: 'Regular', icon: 'credit-card-outline' },
-  { id: 'credit', name: 'Credit Card', icon: 'credit-card' },
+  { id: 'debit', name: 'Debit', icon: 'credit-card-outline' },
+  { id: 'credit', name: 'Credit', icon: 'credit-card' },
   { id: 'wallet', name: 'Wallet', icon: 'wallet' },
 ];
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Platform, Pressable, RefreshControl, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Account } from '../contexts/DataContext';
 import DraggableFlatList, { 
@@ -32,6 +32,8 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
   const navigation = useNavigation<any>();
   const [isDragging, setIsDragging] = useState(false);
   const [sortedAccounts, setSortedAccounts] = useState<Account[]>([]);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const flatListRef = useRef(null);
   
   // Sort accounts by order when component mounts or accounts change
   useEffect(() => {
@@ -79,7 +81,7 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
     );
   };
   
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<Account>) => {
+  const renderAccountItem = (item: Account, index: number) => {
     const handlePress = () => {
       if (!isDragging) {
         // Use the onEditAccount callback if provided, otherwise try to navigate
@@ -124,68 +126,221 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
     }
     
     return (
-      <ScaleDecorator>
-        <OpacityDecorator activeOpacity={0.7}>
-          <GestureHandlerRootView>
-            <Swipeable
-              renderRightActions={() => renderRightActions(item)}
-              enabled={!isDragging && !!onDeleteAccount}
-            >
-              <Pressable
-                onPress={handlePress}
-                onLongPress={() => {
-                  setIsDragging(true);
-                  drag();
-                }}
-                style={({ pressed }) => [
-                  styles.accountItem,
-                  isActive && styles.activeItem,
-                  pressed && styles.pressedItem
-                ]}
-              >
-                <View style={styles.accountContent}>
-                  <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
-                    <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
+      <View key={item.id} style={styles.accountItemWrapper}>
+        {Platform.OS === 'web' ? (
+          // Web version - simpler implementation without swipeable
+          <Pressable
+            testID="account-item-pressable"
+            onPress={handlePress}
+            style={({ pressed }) => [
+              styles.accountItem,
+              pressed && styles.pressedItem
+            ]}
+          >
+            <View style={styles.accountContent}>
+              <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
+                <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
+              </View>
+              <View style={styles.accountDetails}>
+                <View style={styles.accountNameRow}>
+                  <Text style={styles.accountName}>{item.name}</Text>
+                  <View style={[styles.typeBadge, { backgroundColor: badgeColor }]}>
+                    <Text style={styles.typeBadgeText}>
+                      {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                    </Text>
                   </View>
-                  <View style={styles.accountDetails}>
-                    <View style={styles.accountNameRow}>
-                      <Text style={styles.accountName}>{item.name}</Text>
-                      <View style={[styles.typeBadge, { backgroundColor: badgeColor }]}>
-                        <Text style={styles.typeBadgeText}>
-                          {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.balanceContainer}>
-                      <Text 
-                        style={[
-                          styles.accountBalance, 
-                          item.balance < 0 && styles.negativeBalance
-                        ]}
-                      >
-                        {formattedBalance}
-                      </Text>
-                      {creditInfo}
-                    </View>
-                  </View>
-                  <MaterialCommunityIcons 
-                    name="drag" 
-                    size={24} 
-                    color="#8E8E93" 
-                    style={styles.dragHandle}
-                  />
                 </View>
-              </Pressable>
-            </Swipeable>
-          </GestureHandlerRootView>
-        </OpacityDecorator>
-      </ScaleDecorator>
+                <View style={styles.balanceContainer}>
+                  <Text 
+                    style={[
+                      styles.accountBalance, 
+                      item.balance < 0 && styles.negativeBalance
+                    ]}
+                  >
+                    {formattedBalance}
+                  </Text>
+                  {creditInfo}
+                </View>
+              </View>
+              {onDeleteAccount && (
+                <Pressable 
+                  onPress={() => onDeleteAccount(item)}
+                  style={styles.webDeleteButton}
+                >
+                  <MaterialCommunityIcons name="trash-can-outline" size={20} color="#8E8E93" />
+                </Pressable>
+              )}
+            </View>
+          </Pressable>
+        ) : (
+          // Mobile version - with swipeable and drag functionality
+          <ScaleDecorator>
+            <OpacityDecorator activeOpacity={0.7}>
+              <GestureHandlerRootView>
+                <Swipeable
+                  renderRightActions={() => renderRightActions(item)}
+                  enabled={!isDragging && !!onDeleteAccount}
+                >
+                  <Pressable
+                    testID="account-item-pressable"
+                    onPress={handlePress}
+                    onLongPress={() => {
+                      setIsDragging(true);
+                      // This is handled by DraggableFlatList
+                    }}
+                    style={({ pressed }) => [
+                      styles.accountItem,
+                      pressed && styles.pressedItem
+                    ]}
+                  >
+                    <View style={styles.accountContent}>
+                      <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
+                        <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
+                      </View>
+                      <View style={styles.accountDetails}>
+                        <View style={styles.accountNameRow}>
+                          <Text style={styles.accountName}>{item.name}</Text>
+                          <View style={[styles.typeBadge, { backgroundColor: badgeColor }]}>
+                            <Text style={styles.typeBadgeText}>
+                              {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.balanceContainer}>
+                          <Text 
+                            style={[
+                              styles.accountBalance, 
+                              item.balance < 0 && styles.negativeBalance
+                            ]}
+                          >
+                            {formattedBalance}
+                          </Text>
+                          {creditInfo}
+                        </View>
+                      </View>
+                      <MaterialCommunityIcons 
+                        name="drag" 
+                        size={24} 
+                        color="#8E8E93" 
+                        style={styles.dragHandle}
+                      />
+                    </View>
+                  </Pressable>
+                </Swipeable>
+              </GestureHandlerRootView>
+            </OpacityDecorator>
+          </ScaleDecorator>
+        )}
+      </View>
     );
   };
   
-  return (
-    <View style={styles.container}>
+  // For mobile platforms, use DraggableFlatList
+  const renderMobileList = () => {
+    const renderItem = ({ item, drag, isActive }: RenderItemParams<Account>) => {
+      const handlePress = () => {
+        if (!isDragging && onEditAccount) {
+          onEditAccount(item);
+        } else if (!isDragging) {
+          navigation.navigate('AccountForm', { account: item });
+        }
+      };
+      
+      // Determine icon
+      let iconName = item.icon || 'credit-card';
+      
+      // Format balance
+      const formattedBalance = formatCurrency(item.balance);
+      
+      // For credit accounts, show available credit
+      let creditInfo = null;
+      if (item.type === 'credit' && item.creditLimit) {
+        const availableCredit = item.creditLimit + item.balance;
+        creditInfo = (
+          <Text style={styles.creditInfo}>₱ {availableCredit.toLocaleString()}</Text>
+        );
+      }
+      
+      // Determine account type badge
+      let badgeColor;
+      switch (item.type) {
+        case 'debit':
+          badgeColor = '#4CAF50';
+          break;
+        case 'credit':
+          badgeColor = '#FF4B8C';
+          break;
+        case 'wallet':
+          badgeColor = '#FFD700';
+          break;
+        default:
+          badgeColor = '#8E8E93';
+      }
+      
+      return (
+        <ScaleDecorator>
+          <OpacityDecorator activeOpacity={0.7}>
+            <GestureHandlerRootView>
+              <Swipeable
+                renderRightActions={() => renderRightActions(item)}
+                enabled={!isDragging && !!onDeleteAccount}
+              >
+                <Pressable
+                  testID="account-item-pressable"
+                  onPress={handlePress}
+                  onLongPress={() => {
+                    setIsDragging(true);
+                    drag();
+                  }}
+                  style={({ pressed }) => [
+                    styles.accountItem,
+                    isActive && styles.activeItem,
+                    pressed && styles.pressedItem
+                  ]}
+                >
+                  <View style={styles.accountContent}>
+                    <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
+                      <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
+                    </View>
+                    <View style={styles.accountDetails}>
+                      <View style={styles.accountNameRow}>
+                        <Text style={styles.accountName}>{item.name}</Text>
+                        <View style={[styles.typeBadge, { backgroundColor: badgeColor }]}>
+                          <Text style={styles.typeBadgeText}>
+                            {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.balanceContainer}>
+                        <Text 
+                          style={[
+                            styles.accountBalance, 
+                            item.balance < 0 && styles.negativeBalance
+                          ]}
+                        >
+                          {formattedBalance}
+                        </Text>
+                        {creditInfo}
+                      </View>
+                    </View>
+                    <MaterialCommunityIcons 
+                      name="drag" 
+                      size={24} 
+                      color="#8E8E93" 
+                      style={styles.dragHandle}
+                    />
+                  </View>
+                </Pressable>
+              </Swipeable>
+            </GestureHandlerRootView>
+          </OpacityDecorator>
+        </ScaleDecorator>
+      );
+    };
+    
+    return (
       <DraggableFlatList
+        ref={flatListRef}
         data={sortedAccounts}
         renderItem={renderItem}
         keyExtractor={(item: Account) => item.id}
@@ -202,6 +357,35 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
           ) : undefined
         }
       />
+    );
+  };
+  
+  // For web platform, use ScrollView with manual rendering
+  const renderWebList = () => {
+    return (
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.webScrollView}
+        contentContainerStyle={styles.webListContent}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor="#6B8AFE"
+              colors={["#6B8AFE"]}
+            />
+          ) : undefined
+        }
+      >
+        {sortedAccounts.map((item, index) => renderAccountItem(item, index))}
+      </ScrollView>
+    );
+  };
+  
+  return (
+    <View style={styles.container}>
+      {Platform.OS === 'web' ? renderWebList() : renderMobileList()}
     </View>
   );
 };
@@ -213,6 +397,16 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 20,
+  },
+  webScrollView: {
+    width: '100%',
+    flex: 1,
+  },
+  webListContent: {
+    paddingBottom: 20,
+  },
+  accountItemWrapper: {
+    width: '100%',
   },
   accountItem: {
     backgroundColor: '#2C2C2E',
@@ -322,6 +516,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     fontWeight: '500',
+  },
+  webDeleteButton: {
+    padding: 10,
+    marginLeft: 8,
   },
 });
 
