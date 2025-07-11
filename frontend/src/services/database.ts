@@ -13,7 +13,7 @@ export interface SyncableAccount extends Account {
 interface DatabaseInterface {
   initialize(): Promise<void>;
   isReady(): boolean;
-  getAllAccounts(): Promise<SyncableAccount[]>;
+  getAllAccounts(includeDeleted?: boolean): Promise<SyncableAccount[]>;
   getAccountById(id: string): Promise<SyncableAccount | null>;
   saveAccount(account: SyncableAccount): Promise<void>;
   deleteAccount(id: string): Promise<void>;
@@ -69,12 +69,15 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
     return this.isInitialized;
   }
 
-  async getAllAccounts(): Promise<SyncableAccount[]> {
+  async getAllAccounts(includeDeleted: boolean = false): Promise<SyncableAccount[]> {
     try {
       const accountsJson = await AsyncStorage.getItem(this.ACCOUNTS_KEY);
       if (!accountsJson) return [];
       
       const accounts = JSON.parse(accountsJson) as SyncableAccount[];
+      if (includeDeleted) {
+        return accounts.sort((a, b) => b.updatedAt - a.updatedAt);
+      }
       return accounts.filter(account => !account.isDeleted).sort((a, b) => b.updatedAt - a.updatedAt);
     } catch (error) {
       console.error('Error getting accounts from AsyncStorage:', error);
@@ -84,8 +87,8 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
 
   async getAccountById(id: string): Promise<SyncableAccount | null> {
     try {
-      const accounts = await this.getAllAccounts();
-      return accounts.find(account => account.id === id && !account.isDeleted) || null;
+      const accounts = await this.getAllAccounts(true); // Include deleted accounts
+      return accounts.find(account => account.id === id) || null;
     } catch (error) {
       console.error('Error getting account by ID:', error);
       return null;
@@ -290,12 +293,16 @@ class SQLiteDatabaseService implements DatabaseInterface {
     return this.isInitialized && this.db !== null;
   }
 
-  async getAllAccounts(): Promise<SyncableAccount[]> {
+  async getAllAccounts(includeDeleted: boolean = false): Promise<SyncableAccount[]> {
     if (!this.isReady()) throw new Error('Database not initialized');
     
-    const result = await this.db!.getAllAsync(`
-      SELECT * FROM accounts WHERE isDeleted = 0 ORDER BY updatedAt DESC
-    `) as any[];
+    let query = 'SELECT * FROM accounts';
+    if (!includeDeleted) {
+      query += ' WHERE isDeleted = 0';
+    }
+    query += ' ORDER BY updatedAt DESC';
+    
+    const result = await this.db!.getAllAsync(query) as any[];
     
     return result.map((row: any) => ({
       id: row.id as string,
@@ -317,7 +324,7 @@ class SQLiteDatabaseService implements DatabaseInterface {
     if (!this.isReady()) throw new Error('Database not initialized');
     
     const result = await this.db!.getFirstAsync(
-      'SELECT * FROM accounts WHERE id = ? AND isDeleted = 0',
+      'SELECT * FROM accounts WHERE id = ?',
       [id]
     ) as any;
     

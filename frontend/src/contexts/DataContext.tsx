@@ -39,7 +39,7 @@ interface DataContextType {
   deleteAccount: (id: string) => void;
   addCategory: (category: Category) => void;
   updateCategory: (category: Category) => void;
-  syncData: () => Promise<void>;
+  syncData: (force?: boolean) => Promise<SyncResult>;
   refreshData: () => Promise<void>;
 }
 
@@ -233,7 +233,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           await refreshData();
         }
         
-        await syncService.setAutoSyncEnabled(true);
+        // Disable auto-sync by default
+        await syncService.setAutoSyncEnabled(false);
+        // Set a longer interval for auto-sync when it's enabled
+        await syncService.setAutoSyncInterval(300000); // 5 minutes
       } catch (error) {
         console.error('Failed to initialize database:', error);
       }
@@ -250,7 +253,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const callback = (result: SyncResult) => {
         setLastSyncResult(result);
         setIsSyncing(false);
-        if (result.success) {
+        if (result.success && (result.pulledCount || 0) > 0) {
           refreshData();
         }
       };
@@ -296,21 +299,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const syncData = async () => {
-    if (isSyncing) return;
-    
-    setIsSyncing(true);
+  const syncData = async (force: boolean = false) => {
     try {
-      const result = await syncService.sync();
+      setIsSyncing(true);
+      const result = await syncService.sync(force);
       setLastSyncResult(result);
-      if (result.success) {
-        await refreshData();
-      }
-    } catch (error) {
-      console.error('Sync failed:', error);
-      setLastSyncResult({ success: false, error: (error as Error).message });
-    } finally {
       setIsSyncing(false);
+      
+      if (result.success) {
+        // Ensure the UI message reflects the correct counts
+        console.log(`UI Sync completed - Pushed: ${result.pushedCount}, Pulled: ${result.pulledCount}`);
+        if ((result.pulledCount || 0) > 0) {
+          refreshData();
+        }
+      }
+      return result;
+    } catch (error) {
+      console.error('Error syncing data:', error);
+      setIsSyncing(false);
+      return { success: false, error: (error as Error).message };
     }
   };
 
@@ -330,7 +337,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await refreshData();
       
       if (isOnline) {
-        syncData();
+        await syncData();
       }
     } catch (error) {
       console.error('Failed to add account:', error);
@@ -364,8 +371,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await refreshData();
       
       if (isOnline) {
-        // Add a small delay to ensure the update is saved before syncing
-        setTimeout(() => syncData(), 100);
+        await syncData();  // Remove timeout and await the sync
       }
     } catch (error) {
       console.error('Failed to update account:', error);
@@ -383,7 +389,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await refreshData();
       
       if (isOnline) {
-        syncData();
+        await syncData();
       }
     } catch (error) {
       console.error('Failed to delete account:', error);
