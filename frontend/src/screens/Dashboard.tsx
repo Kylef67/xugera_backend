@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import React, { useRef, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
@@ -26,12 +26,34 @@ export default function Dashboard() {
   
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
-  const totalBalance = accounts.reduce((sum, account) => {
-    if (account.includeInTotal !== false) {
-      return sum + account.balance;
-    }
-    return sum;
-  }, 0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [accountTypeFilter, setAccountTypeFilter] = useState<'all' | 'debit' | 'credit' | 'wallet'>('all');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Filter accounts based on search query and type filter
+  const filteredAccounts = useMemo(() => {
+    return accounts.filter(account => {
+      // Apply search filter
+      const matchesSearch = searchQuery === '' || 
+        account.name.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      // Apply type filter
+      const matchesType = accountTypeFilter === 'all' || account.type === accountTypeFilter;
+      
+      return matchesSearch && matchesType;
+    });
+  }, [accounts, searchQuery, accountTypeFilter]);
+
+  // Calculate total balance for filtered accounts
+  const totalBalance = useMemo(() => {
+    return filteredAccounts.reduce((sum, account) => {
+      if (account.includeInTotal !== false) {
+        return sum + account.balance;
+      }
+      return sum;
+    }, 0);
+  }, [filteredAccounts]);
 
   const handlePresentModal = () => {
     setSelectedAccount(null);
@@ -60,8 +82,31 @@ export default function Dashboard() {
     setShowAccountForm(true);
   };
 
+  const handleDeleteAccount = (account: Account) => {
+    Alert.alert(
+      "Delete Account",
+      `Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: () => {
+            deleteAccount(account.id);
+          }
+        }
+      ]
+    );
+  };
+
   const handleReorderAccounts = (reorderedAccounts: Account[]) => {
     reorderAccounts(reorderedAccounts);
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await syncData(true);
+    setIsRefreshing(false);
   };
 
   if (showAccountForm) {
@@ -100,46 +145,117 @@ export default function Dashboard() {
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity 
-            style={styles.syncButton} 
+            style={styles.actionButton} 
             onPress={() => syncData(true)}
             disabled={!isOnline || isSyncing}
           >
             <MaterialCommunityIcons 
               name={isSyncing ? "sync" : "sync"} 
               size={24} 
-              color={!isOnline || isSyncing ? "#8E8E93" : "#6B8AFE"} 
+              color={!isOnline || isSyncing ? "#8E8E93" : "#8E8E93"} 
             />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.addButton} onPress={handlePresentModal}>
-            <MaterialCommunityIcons name="plus" size={28} color="#8E8E93" />
           </TouchableOpacity>
         </View>
       </View>
 
-      <View style={[styles.tabBar, { justifyContent: 'center' }]}>
-        <Pressable style={styles.tabActive}>
-          <MaterialCommunityIcons name="wallet" size={24} color="#6B8AFE" />
-          <Text style={styles.tabTextActive}>Accounts</Text>
-        </Pressable>
-        <Pressable style={styles.tab}>
-          <MaterialCommunityIcons name="finance" size={24} color="#8E8E93" />
-          <Text style={styles.tabText}>My finances</Text>
-        </Pressable>
+      <View style={styles.filterContainer}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          <TouchableOpacity 
+            style={[styles.filterButton, accountTypeFilter === 'all' && styles.filterButtonActive]} 
+            onPress={() => setAccountTypeFilter('all')}
+          >
+            <Text style={[styles.filterButtonText, accountTypeFilter === 'all' && styles.filterButtonTextActive]}>All</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.filterButton, accountTypeFilter === 'debit' && styles.filterButtonActive]} 
+            onPress={() => setAccountTypeFilter('debit')}
+          >
+            <Text style={[styles.filterButtonText, accountTypeFilter === 'debit' && styles.filterButtonTextActive]}>Debit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.filterButton, accountTypeFilter === 'credit' && styles.filterButtonActive]} 
+            onPress={() => setAccountTypeFilter('credit')}
+          >
+            <Text style={[styles.filterButtonText, accountTypeFilter === 'credit' && styles.filterButtonTextActive]}>Credit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.filterButton, accountTypeFilter === 'wallet' && styles.filterButtonActive]} 
+            onPress={() => setAccountTypeFilter('wallet')}
+          >
+            <Text style={[styles.filterButtonText, accountTypeFilter === 'wallet' && styles.filterButtonTextActive]}>Wallet</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.searchFilterButton} 
+            onPress={() => setShowSearch(!showSearch)}
+          >
+            <MaterialCommunityIcons 
+              name="magnify" 
+              size={20} 
+              color="#FFFFFF" 
+            />
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
+      {showSearch && (
+        <View style={styles.searchContainer}>
+          <View style={styles.searchInputContainer}>
+            <MaterialCommunityIcons name="magnify" size={20} color="#8E8E93" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search accounts..."
+              placeholderTextColor="#8E8E93"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+            />
+            {searchQuery !== '' && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <MaterialCommunityIcons name="close-circle" size={20} color="#8E8E93" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
+
       <View style={styles.header}>
-        <Text style={styles.sectionTitle}>Accounts</Text>
+        <Text style={styles.sectionTitle}>
+          {accountTypeFilter === 'all' ? 'Accounts' : `${accountTypeFilter.charAt(0).toUpperCase() + accountTypeFilter.slice(1)} Accounts`}
+        </Text>
         <Text style={styles.totalAmount}>
           {formatCurrency(totalBalance)}
         </Text>
       </View>
 
       <View style={styles.accountsContainer}>
-        <DraggableAccountList 
-          accounts={accounts} 
-          onReorder={handleReorderAccounts}
-          onEditAccount={handleEditAccount}
-        />
+        {isRefreshing ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#6B8AFE" />
+          </View>
+        ) : filteredAccounts.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialCommunityIcons name="wallet-outline" size={64} color="#8E8E93" />
+            <Text style={styles.emptyText}>
+              {searchQuery ? "No accounts match your search" : "No accounts found"}
+            </Text>
+            <TouchableOpacity style={styles.emptyButton} onPress={handlePresentModal}>
+              <Text style={styles.emptyButtonText}>Add Account</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <DraggableAccountList 
+            accounts={filteredAccounts} 
+            onReorder={handleReorderAccounts}
+            onEditAccount={handleEditAccount}
+            onDeleteAccount={handleDeleteAccount}
+            onRefresh={handleRefresh}
+            isRefreshing={isRefreshing}
+          />
+        )}
       </View>
       
       {lastSyncResult && (
@@ -152,6 +268,11 @@ export default function Dashboard() {
           </Text>
         </View>
       )}
+
+      {/* Floating Add Button */}
+      <TouchableOpacity style={styles.floatingButton} onPress={handlePresentModal}>
+        <MaterialCommunityIcons name="plus" size={28} color="white" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -165,9 +286,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#2C2C2E',
+    backgroundColor: '#1C1C1E',
   },
   profileButton: {
     width: 40,
@@ -178,72 +300,106 @@ const styles = StyleSheet.create({
   headerCenter: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     color: '#8E8E93',
     fontSize: 14,
+    marginBottom: 4,
+    fontWeight: '500',
   },
   headerBalance: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
+    marginBottom: 4,
   },
-  addButton: {
+  actionButton: {
     width: 40,
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 12,
   },
   syncStatusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 2,
+    backgroundColor: 'rgba(30, 30, 30, 0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
   },
   syncStatus: {
     fontSize: 12,
     marginLeft: 4,
     marginRight: 8,
+    fontWeight: '500',
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  syncButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  filterContainer: {
     borderBottomWidth: 1,
     borderBottomColor: '#2C2C2E',
+    backgroundColor: '#1C1C1E',
   },
-  tab: {
+  filterScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
   },
-  tabActive: {
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#2C2C2E',
+    marginRight: 8,
+  },
+  filterButtonActive: {
+    backgroundColor: '#6B8AFE',
+  },
+  filterButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
+  filterButtonTextActive: {
+    fontWeight: 'bold',
+  },
+  searchFilterButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#2C2C2E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#2C2C2E',
+    borderBottomWidth: 1,
+    borderBottomColor: '#3A3A3C',
+  },
+  searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(107, 138, 254, 0.1)',
+    backgroundColor: '#3A3A3C',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
   },
-  tabText: {
-    color: '#8E8E93',
-    marginLeft: 8,
+  searchIcon: {
+    marginRight: 8,
   },
-  tabTextActive: {
-    color: '#6B8AFE',
-    marginLeft: 8,
+  searchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+    padding: 0,
   },
   header: {
     flexDirection: 'row',
@@ -251,6 +407,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
   },
   sectionTitle: {
     fontSize: 24,
@@ -264,12 +422,62 @@ const styles = StyleSheet.create({
   accountsContainer: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  emptyText: {
+    color: '#8E8E93',
+    fontSize: 16,
+    marginTop: 16,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyButton: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    backgroundColor: '#6B8AFE',
+    borderRadius: 20,
+  },
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
   syncResult: {
     padding: 12,
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#2C2C2E',
   },
   syncResultText: {
     color: 'white',
     fontWeight: '500',
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#6B8AFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 }); 

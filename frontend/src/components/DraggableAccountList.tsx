@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Platform, Pressable, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Account } from '../contexts/DataContext';
 import DraggableFlatList, { 
@@ -9,17 +9,25 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { useNavigation } from '@react-navigation/native';
 import { formatCurrency } from '../utils/formatters';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 interface DraggableAccountListProps {
   accounts: Account[];
   onReorder: (accounts: Account[]) => void;
   onEditAccount?: (account: Account) => void;
+  onDeleteAccount?: (account: Account) => void;
+  onRefresh?: () => Promise<void>;
+  isRefreshing?: boolean;
 }
 
 export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({ 
   accounts,
   onReorder,
-  onEditAccount
+  onEditAccount,
+  onDeleteAccount,
+  onRefresh,
+  isRefreshing = false
 }) => {
   const navigation = useNavigation<any>();
   const [isDragging, setIsDragging] = useState(false);
@@ -56,6 +64,20 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
     
     onReorder(updatedAccounts);
   };
+
+  const renderRightActions = (item: Account) => {
+    if (!onDeleteAccount) return null;
+    
+    return (
+      <Pressable 
+        style={styles.deleteAction}
+        onPress={() => onDeleteAccount(item)}
+      >
+        <MaterialCommunityIcons name="trash-can-outline" size={24} color="white" />
+        <Text style={styles.deleteActionText}>Delete</Text>
+      </Pressable>
+    );
+  };
   
   const renderItem = ({ item, drag, isActive }: RenderItemParams<Account>) => {
     const handlePress = () => {
@@ -85,47 +107,77 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
       );
     }
     
+    // Determine account type badge
+    let badgeColor;
+    switch (item.type) {
+      case 'debit':
+        badgeColor = '#4CAF50';
+        break;
+      case 'credit':
+        badgeColor = '#FF4B8C';
+        break;
+      case 'wallet':
+        badgeColor = '#FFD700';
+        break;
+      default:
+        badgeColor = '#8E8E93';
+    }
+    
     return (
       <ScaleDecorator>
         <OpacityDecorator activeOpacity={0.7}>
-          <Pressable
-            onPress={handlePress}
-            onLongPress={() => {
-              setIsDragging(true);
-              drag();
-            }}
-            style={({ pressed }) => [
-              styles.accountItem,
-              isActive && styles.activeItem,
-              pressed && styles.pressedItem
-            ]}
-          >
-            <View style={styles.accountContent}>
-              <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
-                <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
-              </View>
-              <View style={styles.accountDetails}>
-                <Text style={styles.accountName}>{item.name}</Text>
-                <View style={styles.balanceContainer}>
-                  <Text 
-                    style={[
-                      styles.accountBalance, 
-                      item.balance < 0 && styles.negativeBalance
-                    ]}
-                  >
-                    {formattedBalance}
-                  </Text>
-                  {creditInfo}
+          <GestureHandlerRootView>
+            <Swipeable
+              renderRightActions={() => renderRightActions(item)}
+              enabled={!isDragging && !!onDeleteAccount}
+            >
+              <Pressable
+                onPress={handlePress}
+                onLongPress={() => {
+                  setIsDragging(true);
+                  drag();
+                }}
+                style={({ pressed }) => [
+                  styles.accountItem,
+                  isActive && styles.activeItem,
+                  pressed && styles.pressedItem
+                ]}
+              >
+                <View style={styles.accountContent}>
+                  <View style={[styles.iconContainer, { backgroundColor: item.color || '#007AFF' }]}>
+                    <MaterialCommunityIcons name={iconName as any} size={24} color="white" />
+                  </View>
+                  <View style={styles.accountDetails}>
+                    <View style={styles.accountNameRow}>
+                      <Text style={styles.accountName}>{item.name}</Text>
+                      <View style={[styles.typeBadge, { backgroundColor: badgeColor }]}>
+                        <Text style={styles.typeBadgeText}>
+                          {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.balanceContainer}>
+                      <Text 
+                        style={[
+                          styles.accountBalance, 
+                          item.balance < 0 && styles.negativeBalance
+                        ]}
+                      >
+                        {formattedBalance}
+                      </Text>
+                      {creditInfo}
+                    </View>
+                  </View>
+                  <MaterialCommunityIcons 
+                    name="drag" 
+                    size={24} 
+                    color="#8E8E93" 
+                    style={styles.dragHandle}
+                  />
                 </View>
-              </View>
-              <MaterialCommunityIcons 
-                name="drag" 
-                size={24} 
-                color="#8E8E93" 
-                style={styles.dragHandle}
-              />
-            </View>
-          </Pressable>
+              </Pressable>
+            </Swipeable>
+          </GestureHandlerRootView>
         </OpacityDecorator>
       </ScaleDecorator>
     );
@@ -139,6 +191,16 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
         keyExtractor={(item: Account) => item.id}
         onDragEnd={handleDragEnd}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor="#6B8AFE"
+              colors={["#6B8AFE"]}
+            />
+          ) : undefined
+        }
       />
     </View>
   );
@@ -195,11 +257,35 @@ const styles = StyleSheet.create({
   accountDetails: {
     flex: 1,
     marginLeft: 12,
+    justifyContent: 'center',
+  },
+  accountNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
   accountName: {
     fontSize: 16,
     fontWeight: '500',
     color: '#FFFFFF',
+    flex: 1,
+    marginRight: 8,
+  },
+  typeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 50,
+  },
+  typeBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   balanceContainer: {
     flexDirection: 'row',
@@ -219,6 +305,23 @@ const styles = StyleSheet.create({
   },
   dragHandle: {
     padding: 8,
+    alignSelf: 'center',
+  },
+  deleteAction: {
+    backgroundColor: '#FF4B8C',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    marginTop: 10,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+  },
+  deleteActionText: {
+    color: 'white',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
   },
 });
 
