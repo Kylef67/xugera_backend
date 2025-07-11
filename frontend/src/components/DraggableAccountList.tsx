@@ -13,11 +13,13 @@ import { formatCurrency } from '../utils/formatters';
 interface DraggableAccountListProps {
   accounts: Account[];
   onReorder: (accounts: Account[]) => void;
+  onEditAccount?: (account: Account) => void;
 }
 
 export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({ 
   accounts,
-  onReorder
+  onReorder,
+  onEditAccount
 }) => {
   const navigation = useNavigation<any>();
   const [isDragging, setIsDragging] = useState(false);
@@ -58,7 +60,13 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
   const renderItem = ({ item, drag, isActive }: RenderItemParams<Account>) => {
     const handlePress = () => {
       if (!isDragging) {
-        navigation.navigate('AccountForm', { accountId: item.id });
+        // Use the onEditAccount callback if provided, otherwise try to navigate
+        if (onEditAccount) {
+          onEditAccount(item);
+        } else {
+          // Fallback to navigation if onEditAccount is not provided
+          navigation.navigate('AccountForm', { account: item });
+        }
       }
     };
     

@@ -1,2 +1,3 @@
 always test changes with mcp playwright
 run npm run deploy-test in backend directory
+dont always start a new expo instance always check if there is a started instance already

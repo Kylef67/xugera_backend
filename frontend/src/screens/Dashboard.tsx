@@ -137,7 +137,8 @@ export default function Dashboard() {
       <View style={styles.accountsContainer}>
         <DraggableAccountList 
           accounts={accounts} 
-          onReorder={handleReorderAccounts} 
+          onReorder={handleReorderAccounts}
+          onEditAccount={handleEditAccount}
         />
       </View>
       
