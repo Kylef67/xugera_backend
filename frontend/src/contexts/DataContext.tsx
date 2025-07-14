@@ -1,7 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { databaseService, SyncableAccount } from '../services/database';
-import { syncService, SyncResult } from '../services/syncService';
-import NetInfo from '@react-native-community/netinfo';
+import { apiService } from '../services/apiService';
 import { generateObjectId } from '../utils/objectId';
 
 export type Account = {
@@ -31,83 +29,20 @@ export type Category = {
 interface DataContextType {
   accounts: Account[];
   categories: Category[];
-  isOnline: boolean;
-  isSyncing: boolean;
-  lastSyncResult: SyncResult | null;
+  loading: boolean;
+  error: string | null;
   setAccounts: (accounts: Account[]) => void;
   setCategories: (categories: Category[]) => void;
-  addAccount: (account: Account) => void;
-  updateAccount: (account: Account) => void;
-  deleteAccount: (id: string) => void;
-  reorderAccounts: (reorderedAccounts: Account[]) => void;
+  addAccount: (account: Account) => Promise<void>;
+  updateAccount: (account: Account) => Promise<void>;
+  deleteAccount: (id: string) => Promise<void>;
+  reorderAccounts: (reorderedAccounts: Account[]) => Promise<void>;
   addCategory: (category: Category) => void;
   updateCategory: (category: Category) => void;
-  syncData: (force?: boolean) => Promise<SyncResult>;
   refreshData: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
-
-const initialAccounts: Account[] = [
-  {
-    id: generateObjectId(),
-    name: 'KOMOs Lorenz',
-    balance: 74980.39,
-    type: 'debit',
-    icon: 'credit-card',
-    color: '#FF4B8C',
-  },
-  {
-    id: generateObjectId(),
-    name: 'BPI Ana',
-    balance: 16805.94,
-    type: 'debit',
-    icon: 'credit-card',
-    color: '#4CAF50',
-  },
-  {
-    id: generateObjectId(),
-    name: 'Union Bank Lorenz',
-    balance: 8992.90,
-    type: 'debit',
-    icon: 'credit-card',
-    color: '#4CAF50',
-  },
-  {
-    id: generateObjectId(),
-    name: 'BDO Ana',
-    balance: 71374.33,
-    type: 'debit',
-    icon: 'bank',
-    color: '#FFD700',
-  },
-  {
-    id: generateObjectId(),
-    name: 'Wallet Lorenz',
-    balance: 1258,
-    type: 'wallet',
-    icon: 'wallet',
-    color: '#666666',
-  },
-  {
-    id: generateObjectId(),
-    name: 'UnionBank CC Ana',
-    balance: -19117.77,
-    type: 'credit',
-    icon: 'bank',
-    color: '#5C6BC0',
-    creditLimit: 122882,
-  },
-  {
-    id: generateObjectId(),
-    name: 'Security Bank CC Lorenz',
-    balance: -30085.37,
-    type: 'credit',
-    icon: 'bank',
-    color: '#FFD700',
-    creditLimit: 169915,
-  },
-];
 
 const initialCategories: Category[] = [
   {
@@ -213,79 +148,44 @@ const initialCategories: Category[] = [
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
-  const [isOnline, setIsOnline] = useState<boolean>(false);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const initializeData = async () => {
-      try {
-        await databaseService.initialize();
-        await refreshData();
-        
-        const hasInitialData = await databaseService.getAllAccounts();
-        if (hasInitialData.length === 0) {
-          for (const account of initialAccounts) {
-            const syncableAccount = {
-              ...account,
-              updatedAt: Date.now(),
-              isDeleted: false
-            };
-            await databaseService.saveAccount(syncableAccount);
-          }
-          await refreshData();
-        }
-        
-        // Disable auto-sync by default
-        await syncService.setAutoSyncEnabled(false);
-        // Set a longer interval for auto-sync when it's enabled
-        await syncService.setAutoSyncInterval(300000); // 5 minutes
-      } catch (error) {
-        console.error('Failed to initialize database:', error);
-      }
-    };
-
-    const setupNetworkListener = () => {
-      const unsubscribe = NetInfo.addEventListener(state => {
-        setIsOnline(!!(state.isConnected && state.isInternetReachable));
-      });
-      return unsubscribe;
-    };
-
-    const setupSyncCallback = () => {
-      const callback = (result: SyncResult) => {
-        setLastSyncResult(result);
-        setIsSyncing(false);
-        if (result.success && (result.pulledCount || 0) > 0) {
-          refreshData();
-        }
-      };
-      
-      syncService.addSyncCallback(callback);
-      return () => syncService.removeSyncCallback(callback);
-    };
-
-    initializeData();
-    const unsubscribeNetwork = setupNetworkListener();
-    const unsubscribeSync = setupSyncCallback();
-
-    return () => {
-      unsubscribeNetwork();
-      unsubscribeSync();
-      syncService.stopAutoSync();
-    };
+    refreshData();
   }, []);
 
   const refreshData = async () => {
     try {
-      if (!databaseService.isReady()) {
-        console.log('Database not ready, skipping refresh');
-        return;
-      }
+      setLoading(true);
+      setError(null);
       
-      const accountsData = await databaseService.getAllAccounts();
-      const mappedAccounts = accountsData.map(account => ({
-        id: account.id,
+      const result = await apiService.getAllAccounts();
+      
+      if (result.success && result.data) {
+        // Filter out deleted accounts and sort by order
+        const activeAccounts = result.data
+          .filter(account => !account.isDeleted)
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+        
+        setAccounts(activeAccounts);
+      } else {
+        setError(result.error || 'Failed to fetch accounts');
+      }
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+      setError('Failed to refresh data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addAccount = async (account: Account) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.createAccount({
         name: account.name,
         balance: account.balance,
         type: account.type,
@@ -295,135 +195,99 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         includeInTotal: account.includeInTotal,
         creditLimit: account.creditLimit,
         order: account.order,
-        isDeleted: account.isDeleted
-      }));
-      
-      setAccounts(mappedAccounts);
-    } catch (error) {
-      console.error('Failed to refresh data:', error);
-    }
-  };
+      });
 
-  const syncData = async (force: boolean = false) => {
-    try {
-      setIsSyncing(true);
-      const result = await syncService.sync(force);
-      setLastSyncResult(result);
-      setIsSyncing(false);
-      
       if (result.success) {
-        // Ensure the UI message reflects the correct counts
-        console.log(`UI Sync completed - Pushed: ${result.pushedCount}, Pulled: ${result.pulledCount}`);
-        
-        // Always refresh data after a successful sync to ensure UI is up to date
-        // This helps with deleted accounts that might still be showing
         await refreshData();
-      }
-      return result;
-    } catch (error) {
-      console.error('Error syncing data:', error);
-      setIsSyncing(false);
-      return { success: false, error: (error as Error).message };
-    }
-  };
-
-  const addAccount = async (account: Account) => {
-    try {
-      if (!databaseService.isReady()) {
-        await databaseService.initialize();
-      }
-      
-      const syncableAccount = {
-        ...account,
-        updatedAt: Date.now(),
-        isDeleted: false
-      };
-      
-      await databaseService.saveAccount(syncableAccount);
-      await refreshData();
-      
-      if (isOnline) {
-        await syncData();
+      } else {
+        setError(result.error || 'Failed to create account');
       }
     } catch (error) {
       console.error('Failed to add account:', error);
+      setError('Failed to add account');
+    } finally {
+      setLoading(false);
     }
   };
 
   const updateAccount = async (updatedAccount: Account) => {
     try {
-      if (!databaseService.isReady()) {
-        console.error('Database not ready');
-        return;
-      }
+      setLoading(true);
+      setError(null);
       
-      // Get the existing account to preserve serverUpdatedAt and order if they exist
-      const existingAccount = await databaseService.getAccountById(updatedAccount.id);
-      
-      // Create a timestamp that's guaranteed to be newer than any existing timestamp
-      const now = Date.now();
-      
-      await databaseService.saveAccount({
-        ...updatedAccount,
-        // Ensure timestamp is newer than any previous one
-        updatedAt: now + 1,
-        // Preserve server timestamp if it exists
-        serverUpdatedAt: existingAccount?.serverUpdatedAt,
-        // Preserve order if it exists
-        order: existingAccount?.order,
-        isDeleted: false
+      const result = await apiService.updateAccount(updatedAccount.id, {
+        name: updatedAccount.name,
+        balance: updatedAccount.balance,
+        type: updatedAccount.type,
+        icon: updatedAccount.icon,
+        color: updatedAccount.color,
+        description: updatedAccount.description,
+        includeInTotal: updatedAccount.includeInTotal,
+        creditLimit: updatedAccount.creditLimit,
+        order: updatedAccount.order,
       });
-      
-      console.log(`Account updated: ${updatedAccount.name} with timestamp ${now + 1}`);
-      
-      await refreshData();
-      
-      if (isOnline) {
-        await syncData();  // Remove timeout and await the sync
+
+      if (result.success) {
+        await refreshData();
+      } else {
+        setError(result.error || 'Failed to update account');
       }
     } catch (error) {
       console.error('Failed to update account:', error);
+      setError('Failed to update account');
+    } finally {
+      setLoading(false);
     }
   };
 
   const deleteAccount = async (id: string) => {
     try {
-      if (!databaseService.isReady()) {
-        console.error('Database not ready');
-        return;
-      }
+      setLoading(true);
+      setError(null);
       
-      await databaseService.deleteAccount(id);
-      await refreshData();
-      
-      if (isOnline) {
-        await syncData();
+      const result = await apiService.deleteAccount(id);
+
+      if (result.success) {
+        await refreshData();
+      } else {
+        setError(result.error || 'Failed to delete account');
       }
     } catch (error) {
       console.error('Failed to delete account:', error);
+      setError('Failed to delete account');
+    } finally {
+      setLoading(false);
     }
   };
 
   const reorderAccounts = async (reorderedAccounts: Account[]) => {
     try {
-      // Update the local state with the new order
+      setLoading(true);
+      setError(null);
+      
+      // Update local state optimistically
       setAccounts(reorderedAccounts);
       
-      // Prepare the order updates for the database
+      // Prepare the order updates for the API
       const orderUpdates = reorderedAccounts.map((account, index) => ({
         id: account.id,
         order: index
       }));
       
-      // Update the database with the new order
-      await databaseService.updateAccountsOrder(orderUpdates);
-      
-      // Sync the changes if online
-      if (isOnline) {
-        await syncData();
+      const result = await apiService.updateAccountsOrder(orderUpdates);
+
+      if (!result.success) {
+        setError(result.error || 'Failed to reorder accounts');
+        // Revert the optimistic update
+        await refreshData();
       }
     } catch (error) {
       console.error('Error reordering accounts:', error);
+      setError('Error reordering accounts');
+      // Revert the optimistic update
+      await refreshData();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -442,9 +306,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       value={{
         accounts,
         categories,
-        isOnline,
-        isSyncing,
-        lastSyncResult,
+        loading,
+        error,
         setAccounts,
         setCategories,
         addAccount,
@@ -453,7 +316,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         reorderAccounts,
         addCategory,
         updateCategory,
-        syncData,
         refreshData,
       }}
     >

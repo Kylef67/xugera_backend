@@ -18,10 +18,9 @@ export default function Dashboard() {
     updateAccount, 
     deleteAccount, 
     reorderAccounts,
-    isOnline, 
-    isSyncing, 
-    lastSyncResult, 
-    syncData 
+    loading,
+    error,
+    refreshData
   } = useData();
   
   const [showAccountForm, setShowAccountForm] = useState(false);
@@ -105,7 +104,7 @@ export default function Dashboard() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await syncData(true);
+    await refreshData();
     setIsRefreshing(false);
   };
 
@@ -131,28 +130,20 @@ export default function Dashboard() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>All accounts</Text>
           <Text style={styles.headerBalance}>₱ {totalBalance.toLocaleString('en-PH')}</Text>
-          <View style={styles.syncStatusContainer}>
-            <MaterialCommunityIcons 
-              name={isOnline ? "wifi" : "wifi-off"} 
-              size={16} 
-              color={isOnline ? "#4CAF50" : "#FF4B8C"} 
-            />
-            <Text style={[styles.syncStatus, { color: isOnline ? "#4CAF50" : "#FF4B8C" }]}>
-              {isOnline ? "Online" : "Offline"}
-            </Text>
-            {isSyncing && <MaterialCommunityIcons name="sync" size={16} color="#6B8AFE" />}
-          </View>
+          {error && (
+            <Text style={styles.errorText}>{error}</Text>
+          )}
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity 
             style={styles.actionButton} 
-            onPress={() => syncData(true)}
-            disabled={!isOnline || isSyncing}
+            onPress={handleRefresh}
+            disabled={loading}
           >
             <MaterialCommunityIcons 
-              name={isSyncing ? "sync" : "sync"} 
+              name={loading ? "loading" : "refresh"} 
               size={24} 
-              color={!isOnline || isSyncing ? "#8E8E93" : "#8E8E93"} 
+              color={loading ? "#8E8E93" : "#8E8E93"} 
             />
           </TouchableOpacity>
         </View>
@@ -257,17 +248,7 @@ export default function Dashboard() {
           />
         )}
       </View>
-      
-      {lastSyncResult && (
-        <View style={[styles.syncResult, { backgroundColor: lastSyncResult.success ? '#4CAF50' : '#FF4B8C' }]}>
-          <Text style={styles.syncResultText}>
-            {lastSyncResult.success 
-              ? `Synced successfully. ${lastSyncResult.pulledCount || 0} pulled, ${lastSyncResult.pushedCount || 0} pushed.`
-              : `Sync failed: ${lastSyncResult.error}`
-            }
-          </Text>
-        </View>
-      )}
+
 
       {/* Floating Add Button */}
       <TouchableOpacity style={styles.floatingButton} onPress={handlePresentModal}>
@@ -321,21 +302,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 12,
   },
-  syncStatusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    backgroundColor: 'rgba(30, 30, 30, 0.5)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
-  syncStatus: {
-    fontSize: 12,
-    marginLeft: 4,
-    marginRight: 8,
-    fontWeight: '500',
-  },
+
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -451,15 +418,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
   },
-  syncResult: {
-    padding: 12,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#2C2C2E',
-  },
-  syncResultText: {
-    color: 'white',
-    fontWeight: '500',
+  errorText: {
+    color: '#FF4B8C',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
   },
   floatingButton: {
     position: 'absolute',

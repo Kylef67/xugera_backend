@@ -30,13 +30,24 @@ function generateAccountHash(account: any): string {
   return hash.toString(16);
 }
 
+// Helper function to transform account object for frontend
+function transformAccountForFrontend(account: any): any {
+  const transformed = {
+    ...account.toObject(),
+    id: account._id.toString(),
+  };
+  delete transformed._id;
+  delete transformed.__v;
+  return transformed;
+}
+
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
       const account = new Account(req.body);
       await account.save();
       res.status(201).json({
-        data: account,
+        data: transformAccountForFrontend(account),
         message: translate('accounts.created_success', req.lang)
       });
     } catch (err) {
@@ -77,7 +88,7 @@ export default {
       const transactions = await Transaction.find(query).sort({ date: -1 });
       
       res.json({
-        ...account.toObject(),
+        ...transformAccountForFrontend(account),
         transactions
       });
     } catch (err) {
@@ -132,7 +143,7 @@ export default {
           });
           
           return {
-            ...account.toObject(),
+            ...transformAccountForFrontend(account),
             transactions: {
               balance,
               totalIncoming,
@@ -156,7 +167,7 @@ export default {
         res.status(404).json({ error: translate('accounts.not_found', req.lang) });
         return;
       }
-      res.json(account);
+      res.json(transformAccountForFrontend(account));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
