@@ -148,6 +148,15 @@ export default function AddTransactionDrawer({
     }
   }, [accounts, fromAccount, toAccount, transactionType]);
 
+  // Update calendar month when date picker is opened
+  React.useEffect(() => {
+    if (showDatePicker) {
+      // Set calendar month to current date or selected date
+      const currentDate = dateSelection.startDate || new Date();
+      setCalendarMonth(new Date(currentDate));
+    }
+  }, [showDatePicker]);
+
   const handleAmountChange = (text: string) => {
     const numericValue = text.replace(/[^0-9.]/g, '');
     if (numericValue === '' || /^\d*\.?\d*$/.test(numericValue)) {
@@ -176,6 +185,15 @@ export default function AddTransactionDrawer({
       return;
     }
 
+    // Fix timezone issue by using the date directly without splitting
+    const selectedDate = dateSelection.startDate || new Date();
+    const year = selectedDate.getFullYear();
+    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(selectedDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    console.log('Date selected:', dateStr, 'Original date object:', dateSelection.startDate);
+
     const transaction: Transaction = {
       id: editTransaction?.id,
       type: transactionType,
@@ -184,9 +202,9 @@ export default function AddTransactionDrawer({
       toAccount: transactionType === 'transfer' ? toAccount : undefined,
       category: transactionType !== 'transfer' ? category : undefined,
       notes,
-      date: dateSelection.startDate?.toISOString().split('T')[0] || new Date().toISOString().split('T')[0],
+      date: dateStr,
     };
-
+    
     onSubmit(transaction);
   };
 

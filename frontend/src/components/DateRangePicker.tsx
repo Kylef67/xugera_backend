@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Pressable } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-export type DateRangeMode = 'all-time' | 'date-range' | 'today' | 'month' | 'week' | 'day';
+export type DateRangeMode = 'all-time' | 'date-range' | 'today' | 'month' | 'week' | 'day' | 'year';
 
 export type DateRangeSelection = {
   mode: DateRangeMode;
@@ -117,10 +117,17 @@ export default function DateRangePicker({
     },
     {
       id: 'month',
-      title: selection.mode === 'month' ? 'Month' : 'Year',
-      subtitle: selection.mode === 'month' ? 'May 2025' : 'Year 2025',
-      icon: selection.mode === 'month' ? 'numeric-31-box-outline' : 'numeric-365-box-outline',
-      number: selection.mode === 'month' ? '31' : '365',
+      title: 'Month',
+      subtitle: `${endOfMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
+      icon: 'numeric-31-box-outline',
+      number: endOfMonth.getDate().toString(),
+    },
+    {
+      id: 'year',
+      title: 'Year',
+      subtitle: `Year ${today.getFullYear()}`,
+      icon: 'numeric-365-box-outline',
+      number: '365',
     },
   ];
 
@@ -135,11 +142,13 @@ export default function DateRangePicker({
         };
         break;
       case 'today':
+        const dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
         newSelection = {
           mode: 'today',
           startDate: today,
           endDate: today,
-          displayText: 'MON, 26 MAY 2025',
+          displayText: `${dayNames[today.getDay()]}, ${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`,
           displayNumber: '1',
         };
         break;
@@ -148,7 +157,7 @@ export default function DateRangePicker({
           mode: 'week',
           startDate: startOfWeek,
           endDate: endOfWeek,
-          displayText: '26 MAY – 1 JUN 2025',
+          displayText: `${formatDate(startOfWeek)} – ${formatDate(endOfWeek)} ${startOfWeek.getFullYear()}`.toUpperCase(),
           displayNumber: '7',
         };
         break;
@@ -157,8 +166,8 @@ export default function DateRangePicker({
           mode: 'month',
           startDate: startOfMonth,
           endDate: endOfMonth,
-          displayText: 'MAY 2025',
-          displayNumber: '31',
+          displayText: `${endOfMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`.toUpperCase(),
+          displayNumber: endOfMonth.getDate().toString(),
         };
         break;
       case 'date-range':
@@ -173,6 +182,18 @@ export default function DateRangePicker({
         setShowDayPickerModal(true);
         setShowPeriodModal(false);
         return;
+      case 'year':
+        const currentYear = today.getFullYear();
+        const startOfYear = new Date(currentYear, 0, 1);
+        const endOfYear = new Date(currentYear, 11, 31);
+        newSelection = {
+          mode: 'year',
+          startDate: startOfYear,
+          endDate: endOfYear,
+          displayText: `YEAR ${currentYear}`,
+          displayNumber: '365',
+        };
+        break;
       default:
         return;
     }
@@ -302,6 +323,22 @@ export default function DateRangePicker({
         } else {
           return;
         }
+        break;
+      }
+      
+      case 'year': {
+        const currentDate = selection.startDate || new Date();
+        const newYear = currentDate.getFullYear() + (direction === 'next' ? 1 : -1);
+        const startOfYear = new Date(newYear, 0, 1);
+        const endOfYear = new Date(newYear, 11, 31);
+        
+        newSelection = {
+          mode: 'year',
+          startDate: startOfYear,
+          endDate: endOfYear,
+          displayText: `YEAR ${newYear}`,
+          displayNumber: '365',
+        };
         break;
       }
       

@@ -14,7 +14,9 @@ const formatCurrency = (amount: number) => {
 };
 
 const formatDate = (dateString: string) => {
+  // Create a date object that represents the date in the local timezone
   const date = new Date(dateString);
+  
   return {
     day: date.getDate().toString().padStart(2, '0'),
     weekday: date.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase(),
@@ -26,11 +28,28 @@ const groupTransactionsByDate = (transactions: Transaction[]) => {
   const grouped: { [date: string]: Transaction[] } = {};
   
   transactions.forEach(transaction => {
-    const date = transaction.transactionDate.split('T')[0]; // Get date part only
-    if (!grouped[date]) {
-      grouped[date] = [];
+    // Parse the UTC date from the transaction
+    const transactionDate = new Date(transaction.transactionDate);
+    
+    // Create a date object that represents the same date in the local timezone
+    const localDate = new Date(transaction.transactionDate);
+    
+    // Extract year, month, day from the local date
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    const day = String(localDate.getDate()).padStart(2, '0');
+    const dateKey = `${year}-${month}-${day}`;
+    
+    console.log('Transaction date:', transaction.transactionDate, 
+                'Parsed date:', transactionDate, 
+                'Local date:', localDate,
+                'Date key:', dateKey,
+                'Note:', transaction.notes);
+    
+    if (!grouped[dateKey]) {
+      grouped[dateKey] = [];
     }
-    grouped[date].push(transaction);
+    grouped[dateKey].push(transaction);
   });
   
   return Object.entries(grouped)
@@ -45,10 +64,19 @@ const groupTransactionsByDate = (transactions: Transaction[]) => {
 
 export default function Transactions() {
   const { accounts, categories, transactions, getTransactions, addTransaction, updateTransaction, loading, error } = useData();
-  const [dateSelection, setDateSelection] = useState<DateRangeSelection>({
-    mode: 'month',
-    displayText: 'OCTOBER 2024',
-    displayNumber: '31',
+  const [dateSelection, setDateSelection] = useState<DateRangeSelection>(() => {
+    const now = new Date();
+    const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
+                       'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+    const currentMonth = monthNames[now.getMonth()];
+    const currentYear = now.getFullYear();
+    const daysInMonth = new Date(currentYear, now.getMonth() + 1, 0).getDate();
+    
+    return {
+      mode: 'month',
+      displayText: `${currentMonth} ${currentYear}`,
+      displayNumber: daysInMonth.toString(),
+    };
   });
   const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [editTransaction, setEditTransaction] = useState<Transaction | undefined>(undefined);
@@ -73,29 +101,109 @@ export default function Transactions() {
         fromDate = dateSelection.startDate.toISOString();
         toDate = new Date(dateSelection.endDate.getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
       } else if (dateSelection.mode === 'today') {
-        const today = new Date();
-        fromDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-        toDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+        // Use the actual selected date from dateSelection
+        if (dateSelection.startDate) {
+          const selectedDate = new Date(dateSelection.startDate);
+          // Create date objects for start and end of the selected day in local timezone
+          const year = selectedDate.getFullYear();
+          const month = selectedDate.getMonth();
+          const day = selectedDate.getDate();
+          
+          // Set time to start of day (00:00:00) in local timezone, then convert to ISO string
+          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          fromDate = startOfDay.toISOString();
+          
+          // Set time to end of day (23:59:59) in local timezone, then convert to ISO string
+          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          toDate = endOfDay.toISOString();
+          
+          console.log('Today filter - Selected date:', selectedDate, 
+                      'From date:', fromDate, 
+                      'To date:', toDate);
+        } else {
+          // Fallback to current date if no startDate
+          const today = new Date();
+          const year = today.getFullYear();
+          const month = today.getMonth();
+          const day = today.getDate();
+          
+          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          fromDate = startOfDay.toISOString();
+          
+          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          toDate = endOfDay.toISOString();
+        }
       } else if (dateSelection.mode === 'month') {
         // Parse the display text to get the actual month/year
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
+        const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
+                           'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+        const [monthName, yearStr] = dateSelection.displayText.split(' ');
+        const selectedMonth = monthNames.indexOf(monthName);
+        const selectedYear = parseInt(yearStr);
         
-        fromDate = new Date(currentYear, currentMonth, 1).toISOString();
-        toDate = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59).toISOString();
+        fromDate = new Date(selectedYear, selectedMonth, 1).toISOString();
+        toDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59).toISOString();
       } else if (dateSelection.mode === 'week') {
-        const now = new Date();
-        const currentDay = now.getDay();
-        const startOfWeek = new Date(now.getTime() - (currentDay * 24 * 60 * 60 * 1000));
-        const endOfWeek = new Date(startOfWeek.getTime() + (6 * 24 * 60 * 60 * 1000));
-        
-        fromDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate()).toISOString();
-        toDate = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate(), 23, 59, 59).toISOString();
+        // Use the actual selected week dates from dateSelection
+        if (dateSelection.startDate && dateSelection.endDate) {
+          fromDate = new Date(dateSelection.startDate.getFullYear(), dateSelection.startDate.getMonth(), dateSelection.startDate.getDate()).toISOString();
+          toDate = new Date(dateSelection.endDate.getFullYear(), dateSelection.endDate.getMonth(), dateSelection.endDate.getDate(), 23, 59, 59).toISOString();
+        } else {
+          // Fallback to current week if no dates
+          const now = new Date();
+          const currentDay = now.getDay();
+          const startOfWeek = new Date(now.getTime() - (currentDay * 24 * 60 * 60 * 1000));
+          const endOfWeek = new Date(startOfWeek.getTime() + (6 * 24 * 60 * 60 * 1000));
+          
+          fromDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate()).toISOString();
+          toDate = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate(), 23, 59, 59).toISOString();
+        }
       } else if (dateSelection.mode === 'day') {
-        const now = new Date();
-        fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+        // Use the actual selected day from dateSelection
+        if (dateSelection.startDate) {
+          const selectedDate = new Date(dateSelection.startDate);
+          // Create date objects for start and end of the selected day in local timezone
+          const year = selectedDate.getFullYear();
+          const month = selectedDate.getMonth();
+          const day = selectedDate.getDate();
+          
+          // Set time to start of day (00:00:00) in local timezone, then convert to ISO string
+          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          fromDate = startOfDay.toISOString();
+          
+          // Set time to end of day (23:59:59) in local timezone, then convert to ISO string
+          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          toDate = endOfDay.toISOString();
+          
+          console.log('Day filter - Selected date:', selectedDate, 
+                      'From date:', fromDate, 
+                      'To date:', toDate);
+        } else {
+          // Fallback to current date if no startDate
+          const today = new Date();
+          const year = today.getFullYear();
+          const month = today.getMonth();
+          const day = today.getDate();
+          
+          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          fromDate = startOfDay.toISOString();
+          
+          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          toDate = endOfDay.toISOString();
+        }
+      } else if (dateSelection.mode === 'year') {
+        // Add support for year mode
+        let selectedYear: number;
+        if (dateSelection.startDate) {
+          selectedYear = dateSelection.startDate.getFullYear();
+        } else {
+          // Parse year from display text if available
+          const yearMatch = dateSelection.displayText.match(/\d{4}/);
+          selectedYear = yearMatch ? parseInt(yearMatch[0]) : new Date().getFullYear();
+        }
+        
+        fromDate = new Date(selectedYear, 0, 1).toISOString();
+        toDate = new Date(selectedYear, 11, 31, 23, 59, 59).toISOString();
       }
       
       const result = await getTransactions({
@@ -117,6 +225,8 @@ export default function Transactions() {
         transactionDate: transaction.date,
       };
       delete transactionData.date;
+
+      console.log('Transaction date:', transactionData.transactionDate);
 
       if (editTransaction) {
         // Update existing transaction
