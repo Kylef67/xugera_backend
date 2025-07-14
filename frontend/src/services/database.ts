@@ -115,9 +115,32 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
       if (!accountsJson) return [];
       
       const accounts = JSON.parse(accountsJson) as SyncableAccount[];
+      
+      // Clean up deleted accounts that have been synced with the server
+      // This ensures accounts deleted on the server don't persist locally
+      const now = Date.now();
+      const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks in milliseconds
+      
+      // Remove accounts that have been marked as deleted and synced with server
+      // and are older than 2 weeks
+      const cleanedAccounts = accounts.filter(account => {
+        if (account.isDeleted && account.serverUpdatedAt && 
+            (now - account.serverUpdatedAt > TWO_WEEKS_MS)) {
+          console.log(`Removing permanently deleted account: ${account.id}`);
+          return false;
+        }
+        return true;
+      });
+      
+      // If any accounts were removed, update storage
+      if (cleanedAccounts.length < accounts.length) {
+        await AsyncStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(cleanedAccounts));
+        console.log(`Removed ${accounts.length - cleanedAccounts.length} permanently deleted accounts`);
+      }
+      
       if (includeDeleted) {
         // Sort by order first, then by updatedAt as a fallback
-        return accounts.sort((a, b) => {
+        return cleanedAccounts.sort((a, b) => {
           // If both have order, sort by order
           if (a.order !== undefined && b.order !== undefined) {
             return a.order - b.order;
@@ -129,7 +152,7 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
           return b.updatedAt - a.updatedAt;
         });
       }
-      return accounts
+      return cleanedAccounts
         .filter(account => !account.isDeleted)
         .sort((a, b) => {
           // If both have order, sort by order
@@ -181,6 +204,12 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
         if (!accountWithTimestamp.serverUpdatedAt && accounts[existingIndex].serverUpdatedAt) {
           accountWithTimestamp.serverUpdatedAt = accounts[existingIndex].serverUpdatedAt;
         }
+        
+        // Preserve order if not provided
+        if (accountWithTimestamp.order === undefined && accounts[existingIndex].order !== undefined) {
+          accountWithTimestamp.order = accounts[existingIndex].order;
+        }
+        
         accounts[existingIndex] = accountWithTimestamp;
       } else {
         accounts.push(accountWithTimestamp);
@@ -455,6 +484,23 @@ class SQLiteDatabaseService implements DatabaseInterface {
     if (!this.isReady()) throw new Error('Database not initialized');
     
     try {
+      // First, clean up old deleted accounts that have been synced with server
+      const now = Date.now();
+      const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks in milliseconds
+      
+      // Delete accounts that have been marked as deleted, synced with server, and are older than 2 weeks
+      const cleanupResult = await this.db!.runAsync(`
+        DELETE FROM accounts 
+        WHERE isDeleted = 1 
+        AND serverUpdatedAt IS NOT NULL 
+        AND (? - serverUpdatedAt) > ?
+      `, [now, TWO_WEEKS_MS]);
+      
+      if (cleanupResult.changes > 0) {
+        console.log(`Permanently removed ${cleanupResult.changes} deleted accounts from SQLite`);
+      }
+      
+      // Now get the remaining accounts
       let query = `
         SELECT * FROM accounts
       `;
@@ -521,12 +567,20 @@ class SQLiteDatabaseService implements DatabaseInterface {
     // Generate a new timestamp that's guaranteed to be newer than any previous timestamp
     const now = Date.now();
     
-    // First, check if we need to preserve serverUpdatedAt from existing account
+    // First, check if we need to preserve serverUpdatedAt and order from existing account
     let serverUpdatedAt = account.serverUpdatedAt;
-    if (!serverUpdatedAt) {
-      const existingAccount = await this.getAccountById(account.id);
-      if (existingAccount?.serverUpdatedAt) {
+    let order = account.order;
+    
+    const existingAccount = await this.getAccountById(account.id);
+    if (existingAccount) {
+      // Preserve serverUpdatedAt if not provided
+      if (!serverUpdatedAt && existingAccount.serverUpdatedAt) {
         serverUpdatedAt = existingAccount.serverUpdatedAt;
+      }
+      
+      // Preserve order if not provided
+      if (order === undefined && existingAccount.order !== undefined) {
+        order = existingAccount.order;
       }
     }
     
@@ -534,7 +588,8 @@ class SQLiteDatabaseService implements DatabaseInterface {
       ...account,
       // If account already has an updatedAt timestamp, use the newer one
       updatedAt: Math.max(now, account.updatedAt || 0),
-      serverUpdatedAt
+      serverUpdatedAt,
+      order
     };
     
     await this.db!.runAsync(`

@@ -160,6 +160,11 @@ class SyncService {
               isDeleted: serverAccount.isDeleted || false
             };
             accountsToUpdate.push(syncableAccount);
+            
+            // Log if we're processing a deleted account
+            if (serverAccount.isDeleted) {
+              console.log(`Processing deleted account from server: ${serverAccount.id}`);
+            }
           }
         }
 
@@ -167,6 +172,7 @@ class SyncService {
         if (accountsToUpdate.length > 0) {
           await Promise.all(accountsToUpdate.map(async account => {
             if (account.isDeleted) {
+              console.log(`Marking account as deleted locally: ${account.id}`);
               await databaseService.deleteAccount(account.id);
             } else {
               await databaseService.saveAccount(account);
@@ -175,6 +181,53 @@ class SyncService {
           
           pulledCount += accountsToUpdate.length;
           console.log(`Updated ${accountsToUpdate.length} accounts from server`);
+        }
+      }
+
+      // After processing all server accounts, check for any accounts that exist locally
+      // but were not returned by the server (they might have been deleted on the server)
+      const allLocalAccounts = await databaseService.getAllAccounts(true); // Include deleted
+      const serverAccountIds = new Set(serverAccounts.map(acc => acc.id));
+      
+      // Find accounts that exist locally but not on the server and weren't updated in this sync
+      const localOnlyAccounts = allLocalAccounts.filter(
+        acc => !serverAccountIds.has(acc.id) && 
+               !acc.isDeleted && 
+               (!acc.serverUpdatedAt || acc.serverUpdatedAt < lastSyncTimestamp)
+      );
+      
+      if (localOnlyAccounts.length > 0) {
+        console.log(`Found ${localOnlyAccounts.length} accounts that may have been deleted on server`);
+        
+        // Check with server if these accounts still exist
+        const verifyResponse = await fetch(`${this.baseUrl}/account/verify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            accountIds: localOnlyAccounts.map(acc => acc.id)
+          })
+        });
+        
+        if (verifyResponse.ok) {
+          const verifyData = await verifyResponse.json();
+          const existingIds = new Set(verifyData.existingIds || []);
+          
+          // Mark accounts as deleted if they don't exist on server
+          await Promise.all(localOnlyAccounts.map(async account => {
+            if (!existingIds.has(account.id)) {
+              console.log(`Account ${account.id} not found on server, marking as deleted locally`);
+              const deletedAccount: SyncableAccount = {
+                ...account,
+                isDeleted: true,
+                updatedAt: serverTimestamp,
+                serverUpdatedAt: serverTimestamp
+              };
+              await databaseService.saveAccount(deletedAccount);
+              pulledCount++;
+            }
+          }));
         }
       }
 

@@ -76,6 +76,29 @@ export default function AddTransactionDrawer({
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [error, setError] = useState<string | null>(null);
+
+  // Filter out deleted accounts
+  const availableAccounts = accounts.filter(account => !account.isDeleted);
+  
+  // Check if selected accounts still exist (not deleted)
+  const selectedFromAccount = availableAccounts.find(acc => acc.id === fromAccount);
+  const selectedToAccount = availableAccounts.find(acc => acc.id === toAccount);
+  
+  // Reset selected accounts if they've been deleted
+  React.useEffect(() => {
+    if (fromAccount && !selectedFromAccount) {
+      setFromAccount('');
+      setError('The previously selected account is no longer available.');
+    }
+    
+    if (toAccount && !selectedToAccount && transactionType === 'transfer') {
+      setToAccount('');
+      if (!error) {
+        setError('The previously selected destination account is no longer available.');
+      }
+    }
+  }, [accounts, fromAccount, toAccount, transactionType]);
 
   const handleAmountChange = (text: string) => {
     // Allow only numbers and decimal point
@@ -95,9 +118,41 @@ export default function AddTransactionDrawer({
     setAmount(numericValue);
   };
 
-
-
   const handleSubmit = () => {
+    // Clear any previous errors
+    setError(null);
+    
+    // Validate that accounts exist and are not deleted
+    if (!selectedFromAccount) {
+      setError('Please select a valid account.');
+      return;
+    }
+    
+    if (transactionType === 'transfer' && !selectedToAccount) {
+      setError('Please select a valid destination account.');
+      return;
+    }
+    
+    // Validate amount
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid amount.');
+      return;
+    }
+    
+    // For expense or transfer, check if there are sufficient funds
+    if (transactionType === 'expense' || transactionType === 'transfer') {
+      if (selectedFromAccount.balance < parseFloat(amount)) {
+        setError(`Insufficient funds in ${selectedFromAccount.name}.`);
+        return;
+      }
+    }
+    
+    // For non-transfer transactions, validate category
+    if (transactionType !== 'transfer' && !category) {
+      setError('Please select a category.');
+      return;
+    }
+
     const transaction: Transaction = {
       id: editTransaction?.id,
       type: transactionType,
@@ -178,8 +233,6 @@ export default function AddTransactionDrawer({
     transactionType === 'income' ? cat.type === 'Income' : cat.type === 'Expense'
   );
 
-  const selectedFromAccount = accounts.find(acc => acc.id === fromAccount);
-  const selectedToAccount = accounts.find(acc => acc.id === toAccount);
   const selectedCategory = categories.find(cat => cat.id === category);
 
   return (
@@ -381,6 +434,35 @@ export default function AddTransactionDrawer({
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Error message display */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <MaterialCommunityIcons name="alert-circle" size={20} color="#FF4B8C" />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[
+              styles.submitButton,
+              (!selectedFromAccount || 
+               (transactionType === 'transfer' && !selectedToAccount) ||
+               !amount || 
+               (transactionType !== 'transfer' && !category)) && 
+              styles.disabledButton
+            ]} 
+            onPress={handleSubmit}
+          >
+            <Text style={styles.submitButtonText}>
+              {editTransaction ? 'Update' : 'Add'} Transaction
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
       </KeyboardAvoidingView>
 
@@ -400,7 +482,7 @@ export default function AddTransactionDrawer({
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalContent}>
-              {accounts.map((account) => (
+              {availableAccounts.map((account) => (
                 <TouchableOpacity
                   key={account.id}
                   style={styles.modalItem}
@@ -444,7 +526,7 @@ export default function AddTransactionDrawer({
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalContent}>
-              {accounts.filter(acc => acc.id !== fromAccount).map((account) => (
+              {availableAccounts.filter(acc => acc.id !== fromAccount).map((account) => (
                 <TouchableOpacity
                   key={account.id}
                   style={styles.modalItem}
@@ -945,5 +1027,48 @@ const styles = StyleSheet.create({
     color: '#6B8AFE',
     fontSize: 16,
     fontWeight: '500',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 24,
+  },
+  cancelButton: {
+    backgroundColor: '#2C2C2E',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  cancelButtonText: {
+    color: '#8E8E93',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  submitButton: {
+    backgroundColor: '#6B8AFE',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 75, 140, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#FF4B8C',
+    marginLeft: 8,
+    flex: 1,
+  },
+  disabledButton: {
+    backgroundColor: '#6B8AFE80', // Add opacity to show disabled state
   },
 }); 

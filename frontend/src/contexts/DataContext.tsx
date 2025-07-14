@@ -15,6 +15,7 @@ export type Account = {
   includeInTotal?: boolean;
   creditLimit?: number;
   order?: number;
+  isDeleted?: boolean;
 };
 
 export type Category = {
@@ -293,7 +294,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         description: account.description,
         includeInTotal: account.includeInTotal,
         creditLimit: account.creditLimit,
-        order: account.order
+        order: account.order,
+        isDeleted: account.isDeleted
       }));
       
       setAccounts(mappedAccounts);
@@ -312,9 +314,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (result.success) {
         // Ensure the UI message reflects the correct counts
         console.log(`UI Sync completed - Pushed: ${result.pushedCount}, Pulled: ${result.pulledCount}`);
-        if ((result.pulledCount || 0) > 0) {
-          refreshData();
-        }
+        
+        // Always refresh data after a successful sync to ensure UI is up to date
+        // This helps with deleted accounts that might still be showing
+        await refreshData();
       }
       return result;
     } catch (error) {
@@ -354,7 +357,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
       
-      // Get the existing account to preserve serverUpdatedAt if it exists
+      // Get the existing account to preserve serverUpdatedAt and order if they exist
       const existingAccount = await databaseService.getAccountById(updatedAccount.id);
       
       // Create a timestamp that's guaranteed to be newer than any existing timestamp
@@ -366,6 +369,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatedAt: now + 1,
         // Preserve server timestamp if it exists
         serverUpdatedAt: existingAccount?.serverUpdatedAt,
+        // Preserve order if it exists
+        order: existingAccount?.order,
         isDeleted: false
       });
       
