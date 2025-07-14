@@ -3,6 +3,47 @@ import Transaction from "../models/transaction";
 import { translate } from "../localization";
 import mongoose from "mongoose";
 
+// Helper function to transform transaction object for frontend
+function transformTransactionForFrontend(transaction: any): any {
+  const obj = transaction.toObject();
+  const transformed = {
+    ...obj,
+    id: transaction._id.toString(),
+  };
+  
+  // Handle populated fields - convert _id to id
+  if (transformed.fromAccount && typeof transformed.fromAccount === 'object' && transformed.fromAccount._id) {
+    transformed.fromAccount = {
+      ...transformed.fromAccount,
+      id: transformed.fromAccount._id.toString()
+    };
+    delete transformed.fromAccount._id;
+    delete transformed.fromAccount.__v;
+  }
+  
+  if (transformed.toAccount && typeof transformed.toAccount === 'object' && transformed.toAccount._id) {
+    transformed.toAccount = {
+      ...transformed.toAccount,
+      id: transformed.toAccount._id.toString()
+    };
+    delete transformed.toAccount._id;
+    delete transformed.toAccount.__v;
+  }
+  
+  if (transformed.category && typeof transformed.category === 'object' && transformed.category._id) {
+    transformed.category = {
+      ...transformed.category,
+      id: transformed.category._id.toString()
+    };
+    delete transformed.category._id;
+    delete transformed.category.__v;
+  }
+  
+  delete transformed._id;
+  delete transformed.__v;
+  return transformed;
+}
+
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
@@ -10,7 +51,7 @@ export default {
       await transaction.save();
       
       res.status(201).json({
-        data: transaction,
+        data: transformTransactionForFrontend(transaction),
         message: translate('transactions.created_success', req.lang)
       });
     } catch (err) {
@@ -79,7 +120,7 @@ export default {
         .populate("fromAccount")
         .populate("toAccount")
         .populate("category");
-      res.json(transactions);
+      res.json(transactions.map(transformTransactionForFrontend));
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -97,7 +138,7 @@ export default {
         });
         return;
       }
-      res.json(transaction);
+      res.json(transformTransactionForFrontend(transaction));
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
     }
@@ -121,7 +162,7 @@ export default {
       }
       
       res.json({
-        data: transaction,
+        data: transformTransactionForFrontend(transaction),
         message: translate('transactions.updated_success', req.lang)
       });
     } catch (err) {

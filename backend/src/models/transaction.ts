@@ -3,9 +3,12 @@ import mongoose, { Document, Schema } from "mongoose";
 interface ITransaction extends Document {
     transactionDate: Date;
     fromAccount: string;
-    toAccount: string;
-    category: string;
+    toAccount?: string;
+    category?: string;
     amount: number;
+    description?: string;
+    notes?: string;
+    type?: 'income' | 'expense' | 'transfer';
 }
 
 const transactionSchema: Schema = new mongoose.Schema({
@@ -31,6 +34,19 @@ const transactionSchema: Schema = new mongoose.Schema({
     amount: {
         type: Number,
         required: true
+    },
+    description: {
+        type: String,
+        required: false
+    },
+    notes: {
+        type: String,
+        required: false
+    },
+    type: {
+        type: String,
+        enum: ['income', 'expense', 'transfer'],
+        required: false
     }
 })
 

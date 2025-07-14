@@ -38,13 +38,13 @@ export type Category = {
 export type Transaction = {
   id: string;
   transactionDate: string;
-  fromAccount: string;
-  toAccount?: string;
-  category?: string;
+  fromAccount: string | Account;
+  toAccount?: string | Account;
+  category?: string | Category;
   amount: number;
   description?: string;
   notes?: string;
-  type?: 'income' | 'expense';
+  type?: 'income' | 'expense' | 'transfer';
 };
 
 interface DataContextType {
@@ -453,11 +453,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(true);
       setError(null);
       
+      // Extract IDs from populated objects if necessary
+      const fromAccountId = typeof transaction.fromAccount === 'object' 
+        ? transaction.fromAccount.id 
+        : transaction.fromAccount;
+      const toAccountId = typeof transaction.toAccount === 'object' 
+        ? transaction.toAccount?.id 
+        : transaction.toAccount;
+      const categoryId = typeof transaction.category === 'object' 
+        ? transaction.category?.id 
+        : transaction.category;
+      
       const result = await apiService.createTransaction({
         transactionDate: transaction.transactionDate,
-        fromAccount: transaction.fromAccount,
-        toAccount: transaction.toAccount,
-        category: transaction.category,
+        fromAccount: fromAccountId,
+        toAccount: toAccountId,
+        category: categoryId,
         amount: transaction.amount,
         description: transaction.description,
         notes: transaction.notes,
@@ -482,11 +493,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(true);
       setError(null);
       
+      // Extract IDs from populated objects if necessary
+      const fromAccountId = typeof updatedTransaction.fromAccount === 'object' 
+        ? updatedTransaction.fromAccount.id 
+        : updatedTransaction.fromAccount;
+      const toAccountId = typeof updatedTransaction.toAccount === 'object' 
+        ? updatedTransaction.toAccount?.id 
+        : updatedTransaction.toAccount;
+      const categoryId = typeof updatedTransaction.category === 'object' 
+        ? updatedTransaction.category?.id 
+        : updatedTransaction.category;
+      
       const result = await apiService.updateTransaction(updatedTransaction.id, {
         transactionDate: updatedTransaction.transactionDate,
-        fromAccount: updatedTransaction.fromAccount,
-        toAccount: updatedTransaction.toAccount,
-        category: updatedTransaction.category,
+        fromAccount: fromAccountId,
+        toAccount: toAccountId,
+        category: categoryId,
         amount: updatedTransaction.amount,
         description: updatedTransaction.description,
         notes: updatedTransaction.notes,

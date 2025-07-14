@@ -54,7 +54,7 @@ describe('Transaction Model', () => {
     expect(savedTransaction._id).toBeDefined();
     expect(savedTransaction.transactionDate).toEqual(transactionData.transactionDate);
     expect(savedTransaction.fromAccount.toString()).toBe(fromAccountId.toString());
-    expect(savedTransaction.toAccount.toString()).toBe(toAccountId.toString());
+    expect(savedTransaction.toAccount?.toString()).toBe(toAccountId.toString());
     expect(savedTransaction.amount).toBe(100.50);
   });
 
@@ -191,8 +191,8 @@ describe('Transaction Model', () => {
     
     // Verify we got the right number of transactions and they have the correct toAccount
     expect(foundTransactions.length).toBe(2);
-    expect(foundTransactions[0].toAccount.toString()).toBe(toAccountId.toString());
-    expect(foundTransactions[1].toAccount.toString()).toBe(toAccountId.toString());
+    expect(foundTransactions[0].toAccount?.toString()).toBe(toAccountId.toString());
+    expect(foundTransactions[1].toAccount?.toString()).toBe(toAccountId.toString());
     
     // Verify the amounts are correct
     expect(foundTransactions.some(t => t.amount === 250)).toBe(true);
@@ -423,7 +423,7 @@ describe('Transaction Model', () => {
     expect(toAccount1Transactions.reduce((sum, t) => sum + t.amount, 0)).toBe(460); // 180 + 280
     
     toAccount1Transactions.forEach(t => {
-      expect(t.toAccount.toString()).toBe(toAccount1.toString());
+      expect(t.toAccount?.toString()).toBe(toAccount1.toString());
     });
   });
 

@@ -53,20 +53,31 @@ export const transactionSchema = {
       message: "Invalid date format"
     }),
     fromAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID"),
-    //toAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID")
+    toAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional(),
+    category: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid category ID").optional(),
+    amount: z.number().min(0, "Amount must be positive"),
+    description: z.string().optional(),
+    notes: z.string().optional(),
+    type: z.enum(['income', 'expense', 'transfer']).optional()
   }),
   update: z.object({
     transactionDate: z.string().refine(val => !isNaN(new Date(val).getTime()), {
       message: "Invalid date format"
     }).optional(),
     fromAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional(),
-    toAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional()
+    toAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional(),
+    category: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid category ID").optional(),
+    amount: z.number().min(0, "Amount must be positive").optional(),
+    description: z.string().optional(),
+    notes: z.string().optional(),
+    type: z.enum(['income', 'expense', 'transfer']).optional()
   }).refine(data => Object.keys(data).length > 0, {
     message: "At least one field must be provided"
   }),
   query: z.object({
     fromAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional(),
     toAccount: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid account ID").optional(),
+    category: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid category ID").optional(),
     fromDate: z.string().optional()
       .refine(val => !val || !isNaN(new Date(val).getTime()), {
         message: "Invalid from date format"

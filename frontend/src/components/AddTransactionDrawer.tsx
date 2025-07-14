@@ -78,6 +78,54 @@ export default function AddTransactionDrawer({
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [error, setError] = useState<string | null>(null);
 
+  // Update form state when editTransaction changes
+  React.useEffect(() => {
+    if (editTransaction) {
+      setTransactionType(editTransaction.type || 'expense');
+      setAmount(editTransaction.amount?.toString() || '');
+      setFromAccount(editTransaction.fromAccount || '');
+      setToAccount(editTransaction.toAccount || '');
+      setCategory(editTransaction.category || '');
+      setNotes(editTransaction.notes || '');
+      
+      setDateSelection({
+        mode: 'day',
+        startDate: editTransaction.date ? new Date(editTransaction.date) : new Date(),
+        endDate: editTransaction.date ? new Date(editTransaction.date) : new Date(),
+        displayText: editTransaction.date 
+          ? new Date(editTransaction.date).toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+          : new Date().toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+      });
+    } else {
+      // Reset form for new transaction
+      setTransactionType('expense');
+      setAmount('');
+      setFromAccount('');
+      setToAccount('');
+      setCategory('');
+      setNotes('');
+      setDateSelection({
+        mode: 'day',
+        startDate: new Date(),
+        endDate: new Date(),
+        displayText: new Date().toLocaleDateString('en-PH', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
+      });
+    }
+    setError(null);
+  }, [editTransaction, accounts, categories]);
+
   // Filter out deleted accounts
   const availableAccounts = accounts.filter(account => !account.isDeleted);
   
@@ -101,47 +149,30 @@ export default function AddTransactionDrawer({
   }, [accounts, fromAccount, toAccount, transactionType]);
 
   const handleAmountChange = (text: string) => {
-    // Allow only numbers and decimal point
     const numericValue = text.replace(/[^0-9.]/g, '');
-    
-    // Prevent multiple decimal points
-    const parts = numericValue.split('.');
-    if (parts.length > 2) {
-      return;
+    if (numericValue === '' || /^\d*\.?\d*$/.test(numericValue)) {
+      setAmount(numericValue);
     }
-    
-    // Limit decimal places to 2
-    if (parts[1] && parts[1].length > 2) {
-      return;
-    }
-    
-    setAmount(numericValue);
   };
 
   const handleSubmit = () => {
-    // Clear any previous errors
-    setError(null);
-    
-    // Validate that accounts exist and are not deleted
     if (!selectedFromAccount) {
-      setError('Please select a valid account.');
+      setError('Please select an account');
       return;
     }
     
     if (transactionType === 'transfer' && !selectedToAccount) {
-      setError('Please select a valid destination account.');
+      setError('Please select a destination account');
       return;
     }
     
-    // Validate amount
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid amount.');
-      return;
-    }
-    
-    // For non-transfer transactions, validate category
     if (transactionType !== 'transfer' && !category) {
-      setError('Please select a category.');
+      setError('Please select a category');
+      return;
+    }
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid amount');
       return;
     }
 
@@ -160,7 +191,7 @@ export default function AddTransactionDrawer({
   };
 
   const handleDateSelect = (selectedDate: Date) => {
-    const newSelection: DateRangeSelection = {
+    setDateSelection({
       mode: 'day',
       startDate: selectedDate,
       endDate: selectedDate,
@@ -169,8 +200,7 @@ export default function AddTransactionDrawer({
         month: 'long',
         day: 'numeric',
       })
-    };
-    setDateSelection(newSelection);
+    });
     setShowDatePicker(false);
   };
 
@@ -179,40 +209,36 @@ export default function AddTransactionDrawer({
     const month = calendarMonth.getMonth();
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
-    const selectedDate = dateSelection.startDate;
-
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - firstDay.getDay());
+    
     const days = [];
-
-    // Add empty cells for days before the first day of the month
-    for (let i = 0; i < startingDayOfWeek; i++) {
-      days.push(<View key={`empty-${i}`} style={styles.calendarDay} />);
-    }
-
-    // Add days of the month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const currentDate = new Date(year, month, day);
-      const isSelected = selectedDate && 
-        currentDate.toDateString() === selectedDate.toDateString();
-      const isToday = currentDate.toDateString() === new Date().toDateString();
+    const today = new Date();
+    
+    for (let i = 0; i < 42; i++) {
+      const day = new Date(startDate);
+      day.setDate(startDate.getDate() + i);
+      
+      const isCurrentMonth = day.getMonth() === month;
+      const isToday = day.toDateString() === today.toDateString();
+      const isSelected = dateSelection.startDate && day.toDateString() === dateSelection.startDate.toDateString();
       
       days.push(
         <TouchableOpacity
-          key={day}
+          key={i}
           style={[
             styles.calendarDay,
             isSelected && styles.selectedDay,
-            isToday && !isSelected && styles.todayDay
+            isToday && styles.todayDay
           ]}
-          onPress={() => handleDateSelect(currentDate)}
+          onPress={() => handleDateSelect(day)}
         >
           <Text style={[
             styles.calendarDayText,
             isSelected && styles.selectedDayText,
             isToday && !isSelected && styles.todayDayText
           ]}>
-            {day}
+            {day.getDate()}
           </Text>
         </TouchableOpacity>
       );

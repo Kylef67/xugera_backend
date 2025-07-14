@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateRangePicker, { DateRangeSelection } from '../components/DateRangePicker';
 import AddTransactionDrawer from '../components/AddTransactionDrawer';
-import { useData, Transaction } from '../contexts/DataContext';
+import { useData, Transaction, Account, Category } from '../contexts/DataContext';
 
 const formatCurrency = (amount: number) => {
   return `₱ ${Math.abs(amount).toLocaleString('en-PH', {
@@ -44,7 +44,7 @@ const groupTransactionsByDate = (transactions: Transaction[]) => {
 };
 
 export default function Transactions() {
-  const { accounts, categories, transactions, getTransactions, loading, error } = useData();
+  const { accounts, categories, transactions, getTransactions, addTransaction, updateTransaction, loading, error } = useData();
   const [dateSelection, setDateSelection] = useState<DateRangeSelection>({
     mode: 'month',
     displayText: 'OCTOBER 2024',
@@ -61,13 +61,42 @@ export default function Transactions() {
 
   const loadTransactions = async () => {
     try {
-      // Calculate date range based on selection
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
+      let fromDate: string | undefined;
+      let toDate: string | undefined;
       
-      const fromDate = new Date(currentYear, currentMonth, 1).toISOString();
-      const toDate = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59).toISOString();
+      // Calculate date range based on selection
+      if (dateSelection.mode === 'all-time') {
+        // No date filtering for all-time
+        fromDate = undefined;
+        toDate = undefined;
+      } else if (dateSelection.mode === 'date-range' && dateSelection.startDate && dateSelection.endDate) {
+        fromDate = dateSelection.startDate.toISOString();
+        toDate = new Date(dateSelection.endDate.getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
+      } else if (dateSelection.mode === 'today') {
+        const today = new Date();
+        fromDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+        toDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+      } else if (dateSelection.mode === 'month') {
+        // Parse the display text to get the actual month/year
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        fromDate = new Date(currentYear, currentMonth, 1).toISOString();
+        toDate = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59).toISOString();
+      } else if (dateSelection.mode === 'week') {
+        const now = new Date();
+        const currentDay = now.getDay();
+        const startOfWeek = new Date(now.getTime() - (currentDay * 24 * 60 * 60 * 1000));
+        const endOfWeek = new Date(startOfWeek.getTime() + (6 * 24 * 60 * 60 * 1000));
+        
+        fromDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate()).toISOString();
+        toDate = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate(), 23, 59, 59).toISOString();
+      } else if (dateSelection.mode === 'day') {
+        const now = new Date();
+        fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+      }
       
       const result = await getTransactions({
         fromDate,
@@ -81,9 +110,28 @@ export default function Transactions() {
   };
 
   const handleAddTransaction = async (transaction: any) => {
-    setShowTransactionForm(false);
-    setEditTransaction(undefined);
-    await loadTransactions(); // Refresh transactions
+    try {
+      // Convert date field to transactionDate for API compatibility
+      const transactionData = {
+        ...transaction,
+        transactionDate: transaction.date,
+      };
+      delete transactionData.date;
+
+      if (editTransaction) {
+        // Update existing transaction
+        await updateTransaction(transactionData);
+      } else {
+        // Add new transaction
+        await addTransaction(transactionData);
+      }
+    } catch (error) {
+      console.error('Failed to save transaction:', error);
+    } finally {
+      setShowTransactionForm(false);
+      setEditTransaction(undefined);
+      await loadTransactions(); // Refresh transactions
+    }
   };
 
   const handleEditTransaction = (transaction: Transaction) => {
@@ -119,26 +167,71 @@ export default function Transactions() {
     return transaction.amount > 0 ? '#4CAF50' : '#FF4B8C';
   };
 
-  const getAccountName = (accountId: string) => {
+  const getAccountName = (accountId: string | Account) => {
+    if (typeof accountId === 'object' && accountId !== null) {
+      return accountId.name;
+    }
     const account = accounts.find(acc => acc.id === accountId);
     return account?.name || 'Unknown Account';
   };
 
-  const getCategoryName = (categoryId?: string) => {
+  const getCategoryName = (categoryId?: string | Category) => {
     if (!categoryId) return 'Transfer';
+    if (typeof categoryId === 'object' && categoryId !== null) {
+      return categoryId.name;
+    }
     const category = categories.find(cat => cat.id === categoryId);
     return category?.name || 'Unknown Category';
   };
 
+  const getTransactionAmountColor = (transaction: Transaction) => {
+    if (transaction.type === 'income') {
+      return '#4CAF50'; // Green for income
+    } else if (transaction.type === 'expense') {
+      return '#FF4B8C'; // Red for expense
+    } else {
+      return '#007AFF'; // Blue for transfer
+    }
+  };
+
+  const getTransactionAmountDisplay = (transaction: Transaction) => {
+    if (transaction.type === 'income') {
+      return `+${formatCurrency(transaction.amount)}`;
+    } else if (transaction.type === 'expense') {
+      return `-${formatCurrency(transaction.amount)}`;
+    } else {
+      return formatCurrency(transaction.amount);
+    }
+  };
+
+  const getTransactionAccountDisplay = (transaction: Transaction) => {
+    if (transaction.type === 'transfer' && transaction.toAccount) {
+      return `${getAccountName(transaction.fromAccount)} → ${getAccountName(transaction.toAccount)}`;
+    } else {
+      return getAccountName(transaction.fromAccount);
+    }
+  };
+
   // Convert DataContext Transaction to AddTransactionDrawer Transaction
   const convertToDrawerTransaction = (transaction: Transaction) => {
+    // Extract IDs from populated objects if necessary
+    const fromAccountId = typeof transaction.fromAccount === 'object' && transaction.fromAccount !== null
+      ? (transaction.fromAccount as any).id 
+      : transaction.fromAccount as string;
+    const toAccountId = typeof transaction.toAccount === 'object' && transaction.toAccount !== null
+      ? (transaction.toAccount as any).id 
+      : transaction.toAccount as string | undefined;
+    const categoryId = typeof transaction.category === 'object' && transaction.category !== null
+      ? (transaction.category as any).id 
+      : transaction.category as string | undefined;
+    
     return {
       id: transaction.id,
       type: (transaction.type || (transaction.amount > 0 ? 'income' : 'expense')) as 'income' | 'expense' | 'transfer',
       amount: transaction.amount,
-      fromAccount: transaction.fromAccount,
-      toAccount: transaction.toAccount,
-      category: transaction.category,
+      fromAccount: fromAccountId || '',
+      toAccount: toAccountId,
+      category: categoryId,
       notes: transaction.notes || '',
       date: transaction.transactionDate,
     };
@@ -170,7 +263,7 @@ export default function Transactions() {
       <View style={styles.transactionInfo}>
         <Text style={styles.transactionTitle}>{getCategoryName(item.category)}</Text>
         <Text style={styles.transactionDescription}>
-          {item.description || getAccountName(item.fromAccount)}
+          {item.description || getTransactionAccountDisplay(item)}
         </Text>
         {item.notes && (
           <Text style={styles.transactionNotes}>{item.notes}</Text>
@@ -179,9 +272,9 @@ export default function Transactions() {
       <View style={styles.transactionAmountContainer}>
         <Text style={[
           styles.transactionAmount,
-          { color: item.amount > 0 ? '#4CAF50' : '#FF4B8C' }
+          { color: getTransactionAmountColor(item) }
         ]}>
-          {item.amount > 0 ? '+' : ''}{formatCurrency(item.amount)}
+          {getTransactionAmountDisplay(item)}
         </Text>
         <Text style={styles.transactionTime}>
           {new Date(item.transactionDate).toLocaleTimeString('en-US', {
@@ -195,7 +288,16 @@ export default function Transactions() {
 
   const renderDateGroup = ({ item }: { item: { date: string; transactions: Transaction[] } }) => {
     const dateInfo = formatDate(item.date);
-    const dayTotal = item.transactions.reduce((sum, t) => sum + t.amount, 0);
+    const dayTotal = item.transactions.reduce((sum, t) => {
+      if (t.type === 'income') {
+        return sum + t.amount;
+      } else if (t.type === 'expense') {
+        return sum - t.amount;
+      } else {
+        // For transfers, don't affect the total
+        return sum;
+      }
+    }, 0);
     
     return (
       <View style={styles.dateGroup}>
@@ -209,7 +311,7 @@ export default function Transactions() {
             styles.dateTotalAmount,
             { color: dayTotal >= 0 ? '#4CAF50' : '#FF4B8C' }
           ]}>
-            {dayTotal >= 0 ? '+' : ''}{formatCurrency(dayTotal)}
+            {dayTotal >= 0 ? '+' : ''}{formatCurrency(Math.abs(dayTotal))}
           </Text>
         </View>
         

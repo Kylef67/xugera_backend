@@ -32,7 +32,7 @@ export interface Transaction {
   amount: number;
   description?: string;
   notes?: string;
-  type?: 'income' | 'expense';
+  type?: 'income' | 'expense' | 'transfer';
 }
 
 class ApiService {
