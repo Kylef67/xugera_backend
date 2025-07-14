@@ -7,6 +7,22 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  type?: 'Income' | 'Expense';
+  parent?: string | null;
+  subcategories?: Category[];
+  transactions?: {
+    direct: { total: number; count: number };
+    subcategories: { total: number; count: number };
+    all: { total: number; count: number };
+  };
+}
+
 class ApiService {
   private baseUrl = 'https://yezfovq877.execute-api.ap-southeast-1.amazonaws.com/test/api';
 
@@ -90,6 +106,54 @@ class ApiService {
       method: 'POST',
       body: { accounts },
     });
+  }
+
+  // Category API methods
+  async getAllCategories(): Promise<ApiResponse<Category[]>> {
+    return this.request<Category[]>('/category');
+  }
+
+  async getCategory(id: string): Promise<ApiResponse<Category>> {
+    return this.request<Category>(`/category/${id}`);
+  }
+
+  async createCategory(category: Omit<Category, 'id'>): Promise<ApiResponse<{ data: Category; message: string }>> {
+    return this.request<{ data: Category; message: string }>('/category', {
+      method: 'POST',
+      body: category,
+    });
+  }
+
+  async updateCategory(id: string, category: Partial<Category>): Promise<ApiResponse<Category>> {
+    return this.request<Category>(`/category/${id}`, {
+      method: 'PUT',
+      body: category,
+    });
+  }
+
+  async deleteCategory(id: string): Promise<ApiResponse<{ message: string }>> {
+    return this.request<{ message: string }>(`/category/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getSubcategories(parentId: string): Promise<ApiResponse<Category[]>> {
+    return this.request<Category[]>(`/category/${parentId}/subcategories`);
+  }
+
+  async getRootCategories(): Promise<ApiResponse<Category[]>> {
+    return this.request<Category[]>('/category/root');
+  }
+
+  async getCategoryTransactions(categoryId: string, fromDate?: string, toDate?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (fromDate) params.append('fromDate', fromDate);
+    if (toDate) params.append('toDate', toDate);
+    
+    const queryString = params.toString();
+    const endpoint = `/category/${categoryId}/transactions${queryString ? `?${queryString}` : ''}`;
+    
+    return this.request<any>(endpoint);
   }
 }
 

@@ -12,13 +12,24 @@ interface ICategory {
   parent?: mongoose.Types.ObjectId | null;
 }
 
+// Helper function to transform category object for frontend
+function transformCategoryForFrontend(category: any): any {
+  const transformed = {
+    ...category.toObject(),
+    id: category._id.toString(),
+  };
+  delete transformed._id;
+  delete transformed.__v;
+  return transformed;
+}
+
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
       const category = new Category(req.body);
       await category.save();
       res.status(201).json({
-        data: category,
+        data: transformCategoryForFrontend(category),
         message: translate('categories.created_success', req.lang)
       })
     } catch (err) {
@@ -32,7 +43,7 @@ export default {
         res.status(404).json({ error: translate('categories.not_found', req.lang) });
         return;
       }
-      res.json(category);
+      res.json(transformCategoryForFrontend(category));
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -115,7 +126,8 @@ export default {
           const directCount = transactionSum.length > 0 ? transactionSum[0].count : 0;
           
           return {
-            ...category.toObject(),
+            ...transformCategoryForFrontend(category),
+            subcategories: subcategories.map(sub => transformCategoryForFrontend(sub)),
             transactions: {
               direct: {
                 total: directTotal,
@@ -148,7 +160,7 @@ export default {
         res.status(404).json({ error: translate('categories.not_found', req.lang) });
         return;
       }
-      res.json(category);
+      res.json(transformCategoryForFrontend(category));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -182,7 +194,7 @@ export default {
       }
       
       const subcategories = await Category.find({ parent: category._id });
-      res.json(subcategories);
+      res.json(subcategories.map(sub => transformCategoryForFrontend(sub)));
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -190,7 +202,7 @@ export default {
   getRootCategories: async (_req: Request, res: Response): Promise<void> => {
     try {
       const rootCategories = await Category.find({ parent: null });
-      res.json(rootCategories);
+      res.json(rootCategories.map(cat => transformCategoryForFrontend(cat)));
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -280,10 +292,7 @@ export default {
       const directCount = transactionSum.length > 0 ? transactionSum[0].count : 0;
       
       res.json({
-        category: {
-          _id: category._id,
-          name: category.name
-        },
+        category: transformCategoryForFrontend(category),
         transactions: {
           direct: {
             total: directTotal,

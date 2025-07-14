@@ -28,12 +28,18 @@ export const accountSchema = {
 export const categorySchema = {
   create: z.object({
     name: z.string().min(1, "Name is required"),
-    description: z.string().min(1, "Description is required").optional(),
+    description: z.string().optional(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    type: z.enum(['Income', 'Expense']).optional(),
     parent: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid parent ID").optional().nullable()
   }),
   update: z.object({
     name: z.string().min(1, "Name is required").optional(),
-    description: z.string().min(1, "Description is required").optional(),
+    description: z.string().optional(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    type: z.enum(['Income', 'Expense']).optional(),
     parent: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid parent ID").optional().nullable()
   }).refine(data => Object.keys(data).length > 0, {
     message: "At least one field must be provided"

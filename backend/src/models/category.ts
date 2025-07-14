@@ -9,8 +9,10 @@ interface ICategory extends Document {
 
 const categorySchema: Schema = new mongoose.Schema({
     name: { type: String, required: true },
-    description: { type: String, required: true },
+    description: { type: String, required: false },
     icon: { type: String, required: false },
+    color: { type: String, required: false },
+    type: { type: String, enum: ['Income', 'Expense'], required: false, default: 'Expense' },
     parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null }
 }, { timestamps: true });
 

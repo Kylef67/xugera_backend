@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { apiService } from '../services/apiService';
+import { apiService, Category as ApiCategory } from '../services/apiService';
 import { generateObjectId } from '../utils/objectId';
 
 export type Account = {
@@ -22,8 +22,17 @@ export type Category = {
   icon: string;
   color: string;
   type: 'Income' | 'Expense';
+  description?: string;
+  parent?: string | null;
+  subcategories?: Category[];
+  transactions?: {
+    direct: { total: number; count: number };
+    subcategories: { total: number; count: number };
+    all: { total: number; count: number };
+  };
+  // Legacy fields for backward compatibility
   amount?: number;
-  transactions?: number;
+  transactionCount?: number;
 };
 
 interface DataContextType {
@@ -37,117 +46,20 @@ interface DataContextType {
   updateAccount: (account: Account) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
   reorderAccounts: (reorderedAccounts: Account[]) => Promise<void>;
-  addCategory: (category: Category) => void;
-  updateCategory: (category: Category) => void;
+  addCategory: (category: Category) => Promise<void>;
+  updateCategory: (category: Category) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  getSubcategories: (parentId: string) => Promise<Category[]>;
+  getCategoryTransactions: (categoryId: string, fromDate?: string, toDate?: string) => Promise<any>;
   refreshData: () => Promise<void>;
+  refreshCategories: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const initialCategories: Category[] = [
-  {
-    id: '1',
-    name: 'Groceries',
-    icon: 'cart',
-    color: '#3D9BFC',
-    type: 'Expense',
-  },
-  {
-    id: '2',
-    name: 'Eating out',
-    icon: 'silverware-fork-knife',
-    color: '#505F92',
-    type: 'Expense',
-  },
-  {
-    id: '3',
-    name: 'Leisure',
-    icon: 'ticket',
-    color: '#E6427B',
-    type: 'Expense',
-  },
-  {
-    id: '4',
-    name: 'Transport',
-    icon: 'bus',
-    color: '#C09046',
-    type: 'Expense',
-  },
-  {
-    id: '5',
-    name: 'Health',
-    icon: 'heart-pulse',
-    color: '#3A8A47',
-    type: 'Expense',
-  },
-  {
-    id: '6',
-    name: 'Gifts',
-    icon: 'gift',
-    color: '#E74C3C',
-    type: 'Expense',
-  },
-  {
-    id: '7',
-    name: 'Family',
-    icon: 'account-group',
-    color: '#5D3F92',
-    type: 'Expense',
-  },
-  {
-    id: '8',
-    name: 'Shopping',
-    icon: 'shopping',
-    color: '#C1834B',
-    type: 'Expense',
-  },
-  {
-    id: '9',
-    name: 'Bills',
-    icon: 'file-document',
-    color: '#FF5B9E',
-    type: 'Expense',
-  },
-  {
-    id: '10',
-    name: 'Gas',
-    icon: 'gas-station',
-    color: '#F39C12',
-    type: 'Expense',
-  },
-  {
-    id: '11',
-    name: 'Transfer fees',
-    icon: 'bank-transfer',
-    color: '#3498DB',
-    type: 'Expense',
-  },
-  {
-    id: '12',
-    name: 'Salary',
-    icon: 'briefcase',
-    color: '#2196F3',
-    type: 'Income',
-  },
-  {
-    id: '13',
-    name: 'Freelance',
-    icon: 'laptop',
-    color: '#4CAF50',
-    type: 'Income',
-  },
-  {
-    id: '14',
-    name: 'Investment',
-    icon: 'chart-line',
-    color: '#FF9800',
-    type: 'Income',
-  },
-];
-
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [categories, setCategories] = useState<Category[]>(initialCategories);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,6 +68,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const refreshData = async () => {
+    await Promise.all([
+      refreshAccounts(),
+      refreshCategories()
+    ]);
+  };
+
+  const refreshAccounts = async () => {
     try {
       setLoading(true);
       setError(null);
@@ -173,10 +92,88 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setError(result.error || 'Failed to fetch accounts');
       }
     } catch (error) {
-      console.error('Failed to refresh data:', error);
-      setError('Failed to refresh data');
+      console.error('Failed to refresh accounts:', error);
+      setError('Failed to refresh accounts');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshCategories = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.getAllCategories();
+      
+      if (result.success && result.data) {
+        // Transform API categories to match frontend format
+        const transformedCategories: Category[] = result.data.map(apiCategory => ({
+          id: apiCategory.id,
+          name: apiCategory.name,
+          icon: apiCategory.icon || 'help-circle', // Default icon if not provided
+          color: apiCategory.color || '#666666', // Default color if not provided
+          type: apiCategory.type || 'Expense', // Default type if not provided
+          description: apiCategory.description,
+          parent: apiCategory.parent,
+          subcategories: apiCategory.subcategories?.map(sub => ({
+            id: sub.id,
+            name: sub.name,
+            icon: sub.icon || 'help-circle',
+            color: sub.color || '#666666',
+            type: sub.type || 'Expense',
+            description: sub.description,
+            parent: sub.parent,
+            transactions: sub.transactions,
+          })) || [],
+          transactions: apiCategory.transactions,
+          // Legacy compatibility fields
+          amount: apiCategory.transactions?.all.total || 0,
+          transactionCount: apiCategory.transactions?.all.count || 0,
+        }));
+        
+        setCategories(transformedCategories);
+      } else {
+        // If no categories exist, create default ones
+        if (result.error?.includes('Empty')) {
+          await seedDefaultCategories();
+        } else {
+          setError(result.error || 'Failed to fetch categories');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh categories:', error);
+      setError('Failed to refresh categories');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const seedDefaultCategories = async () => {
+    const defaultCategories = [
+      { name: 'Groceries', icon: 'cart', color: '#3D9BFC', type: 'Expense' as const, description: 'Food and grocery shopping' },
+      { name: 'Eating out', icon: 'silverware-fork-knife', color: '#505F92', type: 'Expense' as const, description: 'Restaurants and dining' },
+      { name: 'Leisure', icon: 'ticket', color: '#E6427B', type: 'Expense' as const, description: 'Entertainment and recreation' },
+      { name: 'Transport', icon: 'bus', color: '#C09046', type: 'Expense' as const, description: 'Transportation costs' },
+      { name: 'Health', icon: 'heart-pulse', color: '#3A8A47', type: 'Expense' as const, description: 'Medical and health expenses' },
+      { name: 'Gifts', icon: 'gift', color: '#E74C3C', type: 'Expense' as const, description: 'Gifts and presents' },
+      { name: 'Family', icon: 'account-group', color: '#5D3F92', type: 'Expense' as const, description: 'Family expenses' },
+      { name: 'Shopping', icon: 'shopping', color: '#C1834B', type: 'Expense' as const, description: 'General shopping' },
+      { name: 'Bills', icon: 'file-document', color: '#FF5B9E', type: 'Expense' as const, description: 'Utility bills and payments' },
+      { name: 'Gas', icon: 'gas-station', color: '#F39C12', type: 'Expense' as const, description: 'Fuel and gas' },
+      { name: 'Transfer fees', icon: 'bank-transfer', color: '#3498DB', type: 'Expense' as const, description: 'Bank and transfer fees' },
+      { name: 'Salary', icon: 'briefcase', color: '#2196F3', type: 'Income' as const, description: 'Salary and wages' },
+      { name: 'Freelance', icon: 'laptop', color: '#4CAF50', type: 'Income' as const, description: 'Freelance income' },
+      { name: 'Investment', icon: 'chart-line', color: '#FF9800', type: 'Income' as const, description: 'Investment returns' },
+    ];
+
+    try {
+      for (const category of defaultCategories) {
+        await apiService.createCategory(category);
+      }
+      await refreshCategories();
+    } catch (error) {
+      console.error('Failed to seed default categories:', error);
     }
   };
 
@@ -198,7 +195,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshData();
+        await refreshAccounts();
       } else {
         setError(result.error || 'Failed to create account');
       }
@@ -228,7 +225,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshData();
+        await refreshAccounts();
       } else {
         setError(result.error || 'Failed to update account');
       }
@@ -248,7 +245,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const result = await apiService.deleteAccount(id);
 
       if (result.success) {
-        await refreshData();
+        await refreshAccounts();
       } else {
         setError(result.error || 'Failed to delete account');
       }
@@ -279,26 +276,129 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!result.success) {
         setError(result.error || 'Failed to reorder accounts');
         // Revert the optimistic update
-        await refreshData();
+        await refreshAccounts();
       }
     } catch (error) {
       console.error('Error reordering accounts:', error);
       setError('Error reordering accounts');
       // Revert the optimistic update
-      await refreshData();
+      await refreshAccounts();
     } finally {
       setLoading(false);
     }
   };
 
-  const addCategory = (category: Category) => {
-    setCategories(prev => [...prev, category]);
+  const addCategory = async (category: Category) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.createCategory({
+        name: category.name,
+        description: category.description,
+        icon: category.icon,
+        color: category.color,
+        type: category.type,
+        parent: category.parent,
+      });
+
+      if (result.success) {
+        await refreshCategories();
+      } else {
+        setError(result.error || 'Failed to create category');
+      }
+    } catch (error) {
+      console.error('Failed to add category:', error);
+      setError('Failed to add category');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateCategory = (updatedCategory: Category) => {
-    setCategories(prev => prev.map(cat => 
-      cat.id === updatedCategory.id ? updatedCategory : cat
-    ));
+  const updateCategory = async (updatedCategory: Category) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.updateCategory(updatedCategory.id, {
+        name: updatedCategory.name,
+        description: updatedCategory.description,
+        icon: updatedCategory.icon,
+        color: updatedCategory.color,
+        type: updatedCategory.type,
+        parent: updatedCategory.parent,
+      });
+
+      if (result.success) {
+        await refreshCategories();
+      } else {
+        setError(result.error || 'Failed to update category');
+      }
+    } catch (error) {
+      console.error('Failed to update category:', error);
+      setError('Failed to update category');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteCategory = async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.deleteCategory(id);
+
+      if (result.success) {
+        await refreshCategories();
+      } else {
+        setError(result.error || 'Failed to delete category');
+      }
+    } catch (error) {
+      console.error('Failed to delete category:', error);
+      setError('Failed to delete category');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getSubcategories = async (parentId: string): Promise<Category[]> => {
+    try {
+      const result = await apiService.getSubcategories(parentId);
+      if (result.success && result.data) {
+        // Transform API categories to match frontend format
+        return result.data.map(apiCategory => ({
+          id: apiCategory.id,
+          name: apiCategory.name,
+          icon: apiCategory.icon || 'help-circle',
+          color: apiCategory.color || '#666666',
+          type: apiCategory.type || 'Expense',
+          description: apiCategory.description,
+          parent: apiCategory.parent,
+          subcategories: [],
+          transactions: apiCategory.transactions,
+          amount: apiCategory.transactions?.all.total || 0,
+          transactionCount: apiCategory.transactions?.all.count || 0,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Failed to get subcategories:', error);
+      return [];
+    }
+  };
+
+  const getCategoryTransactions = async (categoryId: string, fromDate?: string, toDate?: string) => {
+    try {
+      const result = await apiService.getCategoryTransactions(categoryId, fromDate, toDate);
+      if (result.success) {
+        return result.data;
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to get category transactions:', error);
+      return null;
+    }
   };
 
   return (
@@ -316,7 +416,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         reorderAccounts,
         addCategory,
         updateCategory,
+        deleteCategory,
+        getSubcategories,
+        getCategoryTransactions,
         refreshData,
+        refreshCategories,
       }}
     >
       {children}
