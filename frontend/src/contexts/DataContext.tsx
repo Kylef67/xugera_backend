@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { apiService, Category as ApiCategory } from '../services/apiService';
+import { apiService, Category as ApiCategory, Transaction as ApiTransaction } from '../services/apiService';
 import { generateObjectId } from '../utils/objectId';
 
 export type Account = {
@@ -35,13 +35,27 @@ export type Category = {
   transactionCount?: number;
 };
 
+export type Transaction = {
+  id: string;
+  transactionDate: string;
+  fromAccount: string;
+  toAccount?: string;
+  category?: string;
+  amount: number;
+  description?: string;
+  notes?: string;
+  type?: 'income' | 'expense';
+};
+
 interface DataContextType {
   accounts: Account[];
   categories: Category[];
+  transactions: Transaction[];
   loading: boolean;
   error: string | null;
   setAccounts: (accounts: Account[]) => void;
   setCategories: (categories: Category[]) => void;
+  setTransactions: (transactions: Transaction[]) => void;
   addAccount: (account: Account) => Promise<void>;
   updateAccount: (account: Account) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
@@ -51,8 +65,19 @@ interface DataContextType {
   deleteCategory: (id: string) => Promise<void>;
   getSubcategories: (parentId: string) => Promise<Category[]>;
   getCategoryTransactions: (categoryId: string, fromDate?: string, toDate?: string) => Promise<any>;
+  addTransaction: (transaction: Transaction) => Promise<void>;
+  updateTransaction: (transaction: Transaction) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
+  getTransactions: (params?: {
+    fromAccount?: string;
+    toAccount?: string;
+    category?: string;
+    fromDate?: string;
+    toDate?: string;
+  }) => Promise<Transaction[]>;
   refreshData: () => Promise<void>;
   refreshCategories: () => Promise<void>;
+  refreshTransactions: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -60,6 +85,7 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +96,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const refreshData = async () => {
     await Promise.all([
       refreshAccounts(),
-      refreshCategories()
+      refreshCategories(),
+      refreshTransactions()
     ]);
   };
 
@@ -174,6 +201,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await refreshCategories();
     } catch (error) {
       console.error('Failed to seed default categories:', error);
+    }
+  };
+
+  const refreshTransactions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.getAllTransactions();
+      
+      if (result.success && result.data) {
+        setTransactions(result.data);
+      } else {
+        setError(result.error || 'Failed to fetch transactions');
+      }
+    } catch (error) {
+      console.error('Failed to refresh transactions:', error);
+      setError('Failed to refresh transactions');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -401,15 +448,114 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const addTransaction = async (transaction: Transaction) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.createTransaction({
+        transactionDate: transaction.transactionDate,
+        fromAccount: transaction.fromAccount,
+        toAccount: transaction.toAccount,
+        category: transaction.category,
+        amount: transaction.amount,
+        description: transaction.description,
+        notes: transaction.notes,
+        type: transaction.type,
+      });
+
+      if (result.success) {
+        await refreshTransactions();
+      } else {
+        setError(result.error || 'Failed to create transaction');
+      }
+    } catch (error) {
+      console.error('Failed to add transaction:', error);
+      setError('Failed to add transaction');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateTransaction = async (updatedTransaction: Transaction) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.updateTransaction(updatedTransaction.id, {
+        transactionDate: updatedTransaction.transactionDate,
+        fromAccount: updatedTransaction.fromAccount,
+        toAccount: updatedTransaction.toAccount,
+        category: updatedTransaction.category,
+        amount: updatedTransaction.amount,
+        description: updatedTransaction.description,
+        notes: updatedTransaction.notes,
+        type: updatedTransaction.type,
+      });
+
+      if (result.success) {
+        await refreshTransactions();
+      } else {
+        setError(result.error || 'Failed to update transaction');
+      }
+    } catch (error) {
+      console.error('Failed to update transaction:', error);
+      setError('Failed to update transaction');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteTransaction = async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const result = await apiService.deleteTransaction(id);
+
+      if (result.success) {
+        await refreshTransactions();
+      } else {
+        setError(result.error || 'Failed to delete transaction');
+      }
+    } catch (error) {
+      console.error('Failed to delete transaction:', error);
+      setError('Failed to delete transaction');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+     const getTransactions = async (params?: {
+     fromAccount?: string;
+     toAccount?: string;
+     category?: string;
+     fromDate?: string;
+     toDate?: string;
+   }) => {
+     try {
+       const result = await apiService.getAllTransactions(params);
+       if (result.success && result.data) {
+         return result.data;
+       }
+       return [];
+     } catch (error) {
+       console.error('Failed to get transactions:', error);
+       return [];
+     }
+   };
+
   return (
     <DataContext.Provider
       value={{
         accounts,
         categories,
+        transactions,
         loading,
         error,
         setAccounts,
         setCategories,
+        setTransactions,
         addAccount,
         updateAccount,
         deleteAccount,
@@ -419,8 +565,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         deleteCategory,
         getSubcategories,
         getCategoryTransactions,
+        addTransaction,
+        updateTransaction,
+        deleteTransaction,
+        getTransactions,
         refreshData,
         refreshCategories,
+        refreshTransactions,
       }}
     >
       {children}

@@ -139,14 +139,6 @@ export default function AddTransactionDrawer({
       return;
     }
     
-    // For expense or transfer, check if there are sufficient funds
-    if (transactionType === 'expense' || transactionType === 'transfer') {
-      if (selectedFromAccount.balance < parseFloat(amount)) {
-        setError(`Insufficient funds in ${selectedFromAccount.name}.`);
-        return;
-      }
-    }
-    
     // For non-transfer transactions, validate category
     if (transactionType !== 'transfer' && !category) {
       setError('Please select a category.');

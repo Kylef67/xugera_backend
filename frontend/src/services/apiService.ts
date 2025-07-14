@@ -23,6 +23,18 @@ export interface Category {
   };
 }
 
+export interface Transaction {
+  id: string;
+  transactionDate: string;
+  fromAccount: string;
+  toAccount?: string;
+  category?: string;
+  amount: number;
+  description?: string;
+  notes?: string;
+  type?: 'income' | 'expense';
+}
+
 class ApiService {
   private baseUrl = 'https://yezfovq877.execute-api.ap-southeast-1.amazonaws.com/test/api';
 
@@ -154,6 +166,51 @@ class ApiService {
     const endpoint = `/category/${categoryId}/transactions${queryString ? `?${queryString}` : ''}`;
     
     return this.request<any>(endpoint);
+  }
+
+  // Transaction API methods
+  async getAllTransactions(params?: {
+    fromAccount?: string;
+    toAccount?: string;
+    category?: string;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<ApiResponse<Transaction[]>> {
+    const queryParams = new URLSearchParams();
+    if (params?.fromAccount) queryParams.append('fromAccount', params.fromAccount);
+    if (params?.toAccount) queryParams.append('toAccount', params.toAccount);
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.fromDate) queryParams.append('fromDate', params.fromDate);
+    if (params?.toDate) queryParams.append('toDate', params.toDate);
+    
+    const queryString = queryParams.toString();
+    const endpoint = `/transaction${queryString ? `?${queryString}` : ''}`;
+    
+    return this.request<Transaction[]>(endpoint);
+  }
+
+  async getTransaction(id: string): Promise<ApiResponse<Transaction>> {
+    return this.request<Transaction>(`/transaction/${id}`);
+  }
+
+  async createTransaction(transaction: Omit<Transaction, 'id'>): Promise<ApiResponse<{ data: Transaction; message: string }>> {
+    return this.request<{ data: Transaction; message: string }>('/transaction', {
+      method: 'POST',
+      body: transaction,
+    });
+  }
+
+  async updateTransaction(id: string, transaction: Partial<Transaction>): Promise<ApiResponse<{ data: Transaction; message: string }>> {
+    return this.request<{ data: Transaction; message: string }>(`/transaction/${id}`, {
+      method: 'PUT',
+      body: transaction,
+    });
+  }
+
+  async deleteTransaction(id: string): Promise<ApiResponse<{ message: string }>> {
+    return this.request<{ message: string }>(`/transaction/${id}`, {
+      method: 'DELETE',
+    });
   }
 }
 
