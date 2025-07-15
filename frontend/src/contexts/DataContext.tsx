@@ -45,6 +45,7 @@ export type Transaction = {
   description?: string;
   notes?: string;
   type?: 'income' | 'expense' | 'transfer';
+  isDeleted?: boolean;
 };
 
 interface DataContextType {
@@ -212,7 +213,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const result = await apiService.getAllTransactions();
       
       if (result.success && result.data) {
-        setTransactions(result.data);
+        // Filter out deleted transactions
+        const activeTransactions = result.data.filter(transaction => !transaction.isDeleted);
+        setTransactions(activeTransactions);
       } else {
         setError(result.error || 'Failed to fetch transactions');
       }
@@ -558,7 +561,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      try {
        const result = await apiService.getAllTransactions(params);
        if (result.success && result.data) {
-         return result.data;
+         // Filter out deleted transactions
+         const activeTransactions = result.data.filter(transaction => !transaction.isDeleted);
+         return activeTransactions;
        }
        return [];
      } catch (error) {

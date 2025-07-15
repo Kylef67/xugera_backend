@@ -33,6 +33,7 @@ export interface Transaction {
   description?: string;
   notes?: string;
   type?: 'income' | 'expense' | 'transfer';
+  isDeleted?: boolean;
 }
 
 class ApiService {

@@ -20,6 +20,7 @@
     "expo-sqlite": "^15.2.14",
     "expo-status-bar": "~2.2.3",
     "formik": "^2.4.6",
+    "metro": "^0.82.5",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "^0.79.5",

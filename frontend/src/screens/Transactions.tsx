@@ -242,6 +242,16 @@ export default function Transactions() {
 
   const handleAddTransaction = async (transaction: any) => {
     try {
+      // Handle duplicate case - open a new form with prefilled data
+      if (transaction.isDuplicate) {
+        console.log('Opening duplicate transaction form');
+        // Remove the isDuplicate flag and set as editTransaction for prefilling
+        const { isDuplicate, ...duplicateData } = transaction;
+        setEditTransaction(duplicateData);
+        setShowTransactionForm(true);
+        return;
+      }
+
       // Convert date field to transactionDate for API compatibility
       const transactionData = {
         ...transaction,
@@ -249,21 +259,39 @@ export default function Transactions() {
       };
       delete transactionData.date;
 
-      console.log('Transaction date:', transactionData.transactionDate);
+      console.log('Transaction data before save:', JSON.stringify(transactionData, null, 2));
 
-      if (editTransaction) {
-        // Update existing transaction
+      // Check if this is a delete operation (has isDeleted=true)
+      if (transaction.isDeleted && transaction.id) {
+        console.log('Handling transaction delete');
+        await updateTransaction({
+          id: transaction.id,
+          transactionDate: transactionData.transactionDate,
+          fromAccount: transactionData.fromAccount,
+          amount: transactionData.amount,
+          type: transactionData.type,
+          isDeleted: true
+        });
+      } 
+      // For regular edit with ID
+      else if (transaction.id) {
+        console.log('Handling transaction update');
         await updateTransaction(transactionData);
-      } else {
-        // Add new transaction
+      } 
+      // For new transaction
+      else {
+        console.log('Handling new transaction');
         await addTransaction(transactionData);
       }
     } catch (error) {
       console.error('Failed to save transaction:', error);
     } finally {
-      setShowTransactionForm(false);
-      setEditTransaction(undefined);
-      await loadTransactions(); // Refresh transactions
+      // Only close form and refresh if it's not a duplicate operation
+      if (!transaction.isDuplicate) {
+        setShowTransactionForm(false);
+        setEditTransaction(undefined);
+        await loadTransactions(); // Refresh transactions
+      }
     }
   };
 

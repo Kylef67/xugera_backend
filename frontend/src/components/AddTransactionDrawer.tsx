@@ -26,6 +26,8 @@ interface Transaction {
   category?: string;
   notes: string;
   date: string;
+  isDeleted?: boolean;
+  isDuplicate?: boolean;
 }
 
 interface AddTransactionDrawerProps {
@@ -164,7 +166,34 @@ export default function AddTransactionDrawer({
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (event?: any) => {
+    // Standard validation for regular submit via button
+    if (!selectedFromAccount) {
+      setError('Please select an account');
+      return;
+    }
+    
+    if (transactionType === 'transfer' && !selectedToAccount) {
+      setError('Please select a destination account');
+      return;
+    }
+    
+    if (transactionType !== 'transfer' && !category) {
+      setError('Please select a category');
+      return;
+    }
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('Please enter a valid amount');
+      return;
+    }
+    
+    // Skip validation for delete operations
+    if (editTransaction?.isDeleted) {
+      onSubmit(editTransaction);
+      return;
+    }
+    
     if (!selectedFromAccount) {
       setError('Please select an account');
       return;
@@ -203,6 +232,8 @@ export default function AddTransactionDrawer({
       category: transactionType !== 'transfer' ? category : undefined,
       notes,
       date: dateStr,
+      // Preserve isDeleted flag if it exists
+      isDeleted: editTransaction?.isDeleted
     };
     
     onSubmit(transaction);
@@ -457,19 +488,88 @@ export default function AddTransactionDrawer({
           </TouchableOpacity>
         </View>
 
-        {editTransaction && (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.deleteButton}>
-              <MaterialCommunityIcons name="delete" size={24} color="#FF4B8C" />
-              <Text style={styles.deleteButtonText}>Delete</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.duplicateButton}>
-              <MaterialCommunityIcons name="content-copy" size={24} color="#6B8AFE" />
-              <Text style={styles.duplicateButtonText}>Duplicate</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Single row of action buttons */}
+        <View style={styles.actionButtonsRow}>
+          {editTransaction && (
+            <>
+              <TouchableOpacity 
+                style={styles.iconButton} 
+                onPress={() => {
+                  // Handle delete transaction
+                  if (editTransaction?.id) {
+                    // Use current date and time format from dateSelection
+                    const selectedDate = dateSelection.startDate || new Date();
+                    const year = selectedDate.getFullYear();
+                    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(selectedDate.getDate()).padStart(2, '0');
+                    const dateStr = `${year}-${month}-${day}`;
+                    
+                    // Create transaction with just ID and isDeleted flag
+                    const deletedTransaction = {
+                      id: editTransaction.id,
+                      type: transactionType,
+                      amount: parseFloat(amount) || 0,
+                      fromAccount: fromAccount,
+                      date: dateStr,
+                      notes: notes || '',
+                      isDeleted: true // Mark as deleted for soft delete
+                    };
+                    
+                    // Call onSubmit directly with the deletedTransaction
+                    onSubmit(deletedTransaction);
+                  }
+                }}
+              >
+                <MaterialCommunityIcons name="delete" size={24} color="#FF4B8C" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.iconButton} 
+                onPress={() => {
+                  // Handle duplicate transaction - open a prefilled form
+                  if (editTransaction) {
+                    // Use current date and time format from dateSelection
+                    const selectedDate = dateSelection.startDate || new Date();
+                    const year = selectedDate.getFullYear();
+                    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(selectedDate.getDate()).padStart(2, '0');
+                    const dateStr = `${year}-${month}-${day}`;
+                    
+                    // Create a duplicated transaction object for prefilling the form
+                    const duplicatedTransaction = {
+                      // Don't include ID so it's treated as a new transaction
+                      type: transactionType,
+                      amount: parseFloat(amount) || 0,
+                      fromAccount,
+                      toAccount: transactionType === 'transfer' ? toAccount : undefined,
+                      category: transactionType !== 'transfer' ? category : undefined,
+                      notes: `${notes || ''} (Copy)`,
+                      date: dateStr
+                    };
+                    
+                    console.log('Duplicating transaction for form prefill:', duplicatedTransaction);
+                    
+                    // Call onCancel to close this drawer, then the parent should open a new form
+                    // We'll need to communicate this is a duplicate action
+                    onCancel(); // Close current drawer
+                    
+                    // We need to pass the duplicated data to the parent somehow
+                    // For now, let's use a callback approach by modifying the onSubmit to handle this
+                    setTimeout(() => {
+                      onSubmit({ ...duplicatedTransaction, isDuplicate: true });
+                    }, 100);
+                  }
+                }}
+              >
+                <MaterialCommunityIcons name="content-copy" size={24} color="#6B8AFE" />
+              </TouchableOpacity>
+            </>
+          )}
+
+          <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+            <MaterialCommunityIcons name="close" size={24} color="#8E8E93" />
+          </TouchableOpacity>
+        </View>
 
         {/* Error message display */}
         {error && (
@@ -478,27 +578,6 @@ export default function AddTransactionDrawer({
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
-
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[
-              styles.submitButton,
-              (!selectedFromAccount || 
-               (transactionType === 'transfer' && !selectedToAccount) ||
-               !amount || 
-               (transactionType !== 'transfer' && !category)) && 
-              styles.disabledButton
-            ]} 
-            onPress={handleSubmit}
-          >
-            <Text style={styles.submitButtonText}>
-              {editTransaction ? 'Update' : 'Add'} Transaction
-            </Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
       </KeyboardAvoidingView>
 
@@ -867,34 +946,41 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
   },
-  actionButtons: {
+  actionButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginBottom: 24,
+    marginTop: 24,
   },
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: '#2C2C2E',
-    gap: 8,
+    gap: 6,
+    justifyContent: 'center',
   },
   deleteButtonText: {
     color: '#FF4B8C',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '500',
   },
   duplicateButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: '#2C2C2E',
-    gap: 8,
+    gap: 6,
+    justifyContent: 'center',
   },
   duplicateButtonText: {
     color: '#6B8AFE',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '500',
   },
   selectButton: {
     backgroundColor: '#2C2C2E',
@@ -1064,16 +1150,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 24,
-  },
+  // buttonContainer removed as we're using actionButtonsRow instead
   cancelButton: {
     backgroundColor: '#2C2C2E',
-    paddingHorizontal: 24,
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
+    alignItems: 'center',
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
   },
   cancelButtonText: {
     color: '#8E8E93',
@@ -1082,14 +1168,27 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     backgroundColor: '#6B8AFE',
-    paddingHorizontal: 24,
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
+    alignItems: 'center',
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
   },
   submitButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  iconButton: {
+    backgroundColor: '#2C2C2E',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    width: 60,
+    height: 60,
   },
   errorContainer: {
     flexDirection: 'row',
