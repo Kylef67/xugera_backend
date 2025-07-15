@@ -14,13 +14,13 @@ const formatCurrency = (amount: number) => {
 };
 
 const formatDate = (dateString: string) => {
-  // Create a date object that represents the date in the local timezone
+  // Create a date object from the UTC date string
   const date = new Date(dateString);
   
   return {
-    day: date.getDate().toString().padStart(2, '0'),
-    weekday: date.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase(),
-    month: date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase(),
+    day: date.getUTCDate().toString().padStart(2, '0'),
+    weekday: date.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toUpperCase(),
+    month: date.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase(),
   };
 };
 
@@ -31,18 +31,14 @@ const groupTransactionsByDate = (transactions: Transaction[]) => {
     // Parse the UTC date from the transaction
     const transactionDate = new Date(transaction.transactionDate);
     
-    // Create a date object that represents the same date in the local timezone
-    const localDate = new Date(transaction.transactionDate);
-    
-    // Extract year, month, day from the local date
-    const year = localDate.getFullYear();
-    const month = String(localDate.getMonth() + 1).padStart(2, '0');
-    const day = String(localDate.getDate()).padStart(2, '0');
+    // Extract year, month, day from the UTC date (not local date)
+    const year = transactionDate.getUTCFullYear();
+    const month = String(transactionDate.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(transactionDate.getUTCDate()).padStart(2, '0');
     const dateKey = `${year}-${month}-${day}`;
     
-    console.log('Transaction date:', transaction.transactionDate, 
-                'Parsed date:', transactionDate, 
-                'Local date:', localDate,
+    console.log('Transaction date (UTC):', transaction.transactionDate, 
+                'Parsed UTC date:', transactionDate, 
                 'Date key:', dateKey,
                 'Note:', transaction.notes);
     
@@ -98,28 +94,37 @@ export default function Transactions() {
         fromDate = undefined;
         toDate = undefined;
       } else if (dateSelection.mode === 'date-range' && dateSelection.startDate && dateSelection.endDate) {
-        fromDate = dateSelection.startDate.toISOString();
-        toDate = new Date(dateSelection.endDate.getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
+        // Create UTC dates for the selected range
+        const startYear = dateSelection.startDate.getFullYear();
+        const startMonth = dateSelection.startDate.getMonth();
+        const startDay = dateSelection.startDate.getDate();
+        
+        const endYear = dateSelection.endDate.getFullYear();
+        const endMonth = dateSelection.endDate.getMonth();
+        const endDay = dateSelection.endDate.getDate();
+        
+        fromDate = new Date(Date.UTC(startYear, startMonth, startDay, 0, 0, 0)).toISOString();
+        toDate = new Date(Date.UTC(endYear, endMonth, endDay, 23, 59, 59, 999)).toISOString();
       } else if (dateSelection.mode === 'today') {
         // Use the actual selected date from dateSelection
         if (dateSelection.startDate) {
           const selectedDate = new Date(dateSelection.startDate);
-          // Create date objects for start and end of the selected day in local timezone
+          // Create UTC dates for start and end of the selected day
           const year = selectedDate.getFullYear();
           const month = selectedDate.getMonth();
           const day = selectedDate.getDate();
           
-          // Set time to start of day (00:00:00) in local timezone, then convert to ISO string
-          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          // Create UTC date for start of day (00:00:00 UTC)
+          const startOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0));
           fromDate = startOfDay.toISOString();
           
-          // Set time to end of day (23:59:59) in local timezone, then convert to ISO string
-          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          // Create UTC date for end of day (23:59:59 UTC)
+          const endOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
           toDate = endOfDay.toISOString();
           
           console.log('Today filter - Selected date:', selectedDate, 
-                      'From date:', fromDate, 
-                      'To date:', toDate);
+                      'From date (UTC):', fromDate, 
+                      'To date (UTC):', toDate);
         } else {
           // Fallback to current date if no startDate
           const today = new Date();
@@ -127,10 +132,10 @@ export default function Transactions() {
           const month = today.getMonth();
           const day = today.getDate();
           
-          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          const startOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0));
           fromDate = startOfDay.toISOString();
           
-          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          const endOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
           toDate = endOfDay.toISOString();
         }
       } else if (dateSelection.mode === 'month') {
@@ -141,13 +146,22 @@ export default function Transactions() {
         const selectedMonth = monthNames.indexOf(monthName);
         const selectedYear = parseInt(yearStr);
         
-        fromDate = new Date(selectedYear, selectedMonth, 1).toISOString();
-        toDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59).toISOString();
+        // Create UTC dates for start and end of month
+        fromDate = new Date(Date.UTC(selectedYear, selectedMonth, 1, 0, 0, 0)).toISOString();
+        toDate = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999)).toISOString();
       } else if (dateSelection.mode === 'week') {
         // Use the actual selected week dates from dateSelection
         if (dateSelection.startDate && dateSelection.endDate) {
-          fromDate = new Date(dateSelection.startDate.getFullYear(), dateSelection.startDate.getMonth(), dateSelection.startDate.getDate()).toISOString();
-          toDate = new Date(dateSelection.endDate.getFullYear(), dateSelection.endDate.getMonth(), dateSelection.endDate.getDate(), 23, 59, 59).toISOString();
+          const startYear = dateSelection.startDate.getFullYear();
+          const startMonth = dateSelection.startDate.getMonth();
+          const startDay = dateSelection.startDate.getDate();
+          
+          const endYear = dateSelection.endDate.getFullYear();
+          const endMonth = dateSelection.endDate.getMonth();
+          const endDay = dateSelection.endDate.getDate();
+          
+          fromDate = new Date(Date.UTC(startYear, startMonth, startDay, 0, 0, 0)).toISOString();
+          toDate = new Date(Date.UTC(endYear, endMonth, endDay, 23, 59, 59, 999)).toISOString();
         } else {
           // Fallback to current week if no dates
           const now = new Date();
@@ -155,29 +169,37 @@ export default function Transactions() {
           const startOfWeek = new Date(now.getTime() - (currentDay * 24 * 60 * 60 * 1000));
           const endOfWeek = new Date(startOfWeek.getTime() + (6 * 24 * 60 * 60 * 1000));
           
-          fromDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate()).toISOString();
-          toDate = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate(), 23, 59, 59).toISOString();
+          const startYear = startOfWeek.getFullYear();
+          const startMonth = startOfWeek.getMonth();
+          const startDay = startOfWeek.getDate();
+          
+          const endYear = endOfWeek.getFullYear();
+          const endMonth = endOfWeek.getMonth();
+          const endDay = endOfWeek.getDate();
+          
+          fromDate = new Date(Date.UTC(startYear, startMonth, startDay, 0, 0, 0)).toISOString();
+          toDate = new Date(Date.UTC(endYear, endMonth, endDay, 23, 59, 59, 999)).toISOString();
         }
       } else if (dateSelection.mode === 'day') {
         // Use the actual selected day from dateSelection
         if (dateSelection.startDate) {
           const selectedDate = new Date(dateSelection.startDate);
-          // Create date objects for start and end of the selected day in local timezone
+          // Create UTC dates for start and end of the selected day
           const year = selectedDate.getFullYear();
           const month = selectedDate.getMonth();
           const day = selectedDate.getDate();
           
-          // Set time to start of day (00:00:00) in local timezone, then convert to ISO string
-          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          // Create UTC date for start of day (00:00:00 UTC)
+          const startOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0));
           fromDate = startOfDay.toISOString();
           
-          // Set time to end of day (23:59:59) in local timezone, then convert to ISO string
-          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          // Create UTC date for end of day (23:59:59 UTC)
+          const endOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
           toDate = endOfDay.toISOString();
           
           console.log('Day filter - Selected date:', selectedDate, 
-                      'From date:', fromDate, 
-                      'To date:', toDate);
+                      'From date (UTC):', fromDate, 
+                      'To date (UTC):', toDate);
         } else {
           // Fallback to current date if no startDate
           const today = new Date();
@@ -185,10 +207,10 @@ export default function Transactions() {
           const month = today.getMonth();
           const day = today.getDate();
           
-          const startOfDay = new Date(year, month, day, 0, 0, 0);
+          const startOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0));
           fromDate = startOfDay.toISOString();
           
-          const endOfDay = new Date(year, month, day, 23, 59, 59);
+          const endOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
           toDate = endOfDay.toISOString();
         }
       } else if (dateSelection.mode === 'year') {
@@ -202,8 +224,9 @@ export default function Transactions() {
           selectedYear = yearMatch ? parseInt(yearMatch[0]) : new Date().getFullYear();
         }
         
-        fromDate = new Date(selectedYear, 0, 1).toISOString();
-        toDate = new Date(selectedYear, 11, 31, 23, 59, 59).toISOString();
+        // Create UTC dates for start and end of year
+        fromDate = new Date(Date.UTC(selectedYear, 0, 1, 0, 0, 0)).toISOString();
+        toDate = new Date(Date.UTC(selectedYear, 11, 31, 23, 59, 59, 999)).toISOString();
       }
       
       const result = await getTransactions({

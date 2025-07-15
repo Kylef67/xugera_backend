@@ -84,14 +84,11 @@ export default {
           let fromDateObj: Date;
           
           if (fromDateStr.includes(' ')) {
-            const [datePart, timePart] = fromDateStr.split(' ');
-            const [hours, minutes] = timePart.split(':').map(Number);
-            
-            fromDateObj = new Date(datePart);
-            fromDateObj.setHours(hours, minutes, 0, 0);
-          } else {
+            // Handle datetime strings - parse as ISO string directly
             fromDateObj = new Date(fromDateStr);
-            fromDateObj.setHours(0, 0, 0, 0);
+          } else {
+            // Handle date-only strings - parse as ISO string directly
+            fromDateObj = new Date(fromDateStr);
           }
           
           filter.transactionDate.$gte = fromDateObj;
@@ -102,14 +99,11 @@ export default {
           let toDateObj: Date;
           
           if (toDateStr.includes(' ')) {
-            const [datePart, timePart] = toDateStr.split(' ');
-            const [hours, minutes] = timePart.split(':').map(Number);
-            
-            toDateObj = new Date(datePart);
-            toDateObj.setHours(hours, minutes, 59, 999);
-          } else {
+            // Handle datetime strings - parse as ISO string directly
             toDateObj = new Date(toDateStr);
-            toDateObj.setHours(23, 59, 59, 999);
+          } else {
+            // Handle date-only strings - parse as ISO string directly
+            toDateObj = new Date(toDateStr);
           }
           
           filter.transactionDate.$lte = toDateObj;
