@@ -516,6 +516,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         description: updatedTransaction.description,
         notes: updatedTransaction.notes,
         type: updatedTransaction.type,
+        isDeleted: updatedTransaction.isDeleted,
       });
 
       if (result.success) {

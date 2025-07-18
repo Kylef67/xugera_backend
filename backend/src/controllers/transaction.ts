@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Transaction from "../models/transaction";
 import { translate } from "../localization";
 import mongoose from "mongoose";
+import { addSoftDeleteFilter, performSoftDelete, NOT_DELETED_FILTER } from "../utils/softDelete";
 
 // Helper function to transform transaction object for frontend
 function transformTransactionForFrontend(transaction: any): any {
@@ -62,7 +63,7 @@ export default {
     try {
       const { fromAccount, toAccount, fromDate, toDate, category } = req.query;
       
-      const filter: any = {};
+      let filter: any = {};
       
       if (fromAccount) {
         filter.fromAccount = fromAccount;
@@ -75,6 +76,9 @@ export default {
       if (category) {
         filter.category = category;
       }
+
+      // Add soft delete filter
+      filter = addSoftDeleteFilter(filter);
       
       if (fromDate || toDate) {
         filter.transactionDate = {};
@@ -121,7 +125,9 @@ export default {
   },
   get: async (req: Request, res: Response): Promise<void> => {
     try {
-      const transaction = await Transaction.findById(req.params.id)
+      const transaction = await Transaction.findOne(
+        addSoftDeleteFilter({ _id: req.params.id })
+      )
         .populate("fromAccount")
         .populate("toAccount")
         .populate("category");
@@ -139,8 +145,8 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
-      const transaction = await Transaction.findByIdAndUpdate(
-        req.params.id,
+      const transaction = await Transaction.findOneAndUpdate(
+        addSoftDeleteFilter({ _id: req.params.id }),
         req.body,
         { new: true }
       )
@@ -165,7 +171,7 @@ export default {
   },
   delete: async (req: Request, res: Response): Promise<void> => {
     try {
-      const transaction = await Transaction.findByIdAndDelete(req.params.id);
+      const transaction = await performSoftDelete(Transaction, req.params.id);
       
       if (!transaction) {
         res.status(404).json({ 
@@ -208,6 +214,7 @@ export default {
           { 
             $match: { 
               toAccount: new mongoose.Types.ObjectId(accountId),
+              isDeleted: { $ne: true }, // Filter out soft-deleted transactions
               ...dateCondition
             } 
           },
@@ -217,6 +224,7 @@ export default {
           { 
             $match: { 
               fromAccount: new mongoose.Types.ObjectId(accountId),
+              isDeleted: { $ne: true }, // Filter out soft-deleted transactions
               ...dateCondition
             } 
           },
