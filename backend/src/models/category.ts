@@ -5,6 +5,7 @@ interface ICategory extends Document {
     description: string;
     icon: string;
     parent: mongoose.Types.ObjectId | null;
+    updatedAt?: number;
 }
 
 const categorySchema: Schema = new mongoose.Schema({
@@ -13,7 +14,9 @@ const categorySchema: Schema = new mongoose.Schema({
     icon: { type: String, required: false },
     color: { type: String, required: false },
     type: { type: String, enum: ['Income', 'Expense'], required: false, default: 'Expense' },
-    parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null }
+    parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+    order: { type: Number, default: 0 },
+    updatedAt: { type: Number, default: Date.now }
 }, { timestamps: true });
 
 // Virtual for getting subcategories

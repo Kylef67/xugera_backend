@@ -44,6 +44,28 @@ function transformTransactionForFrontend(transaction: any): any {
   delete transformed.__v;
   return transformed;
 }
+// Helper to generate a simple hash for transaction content comparison
+function generateTransactionHash(tx: any): string {
+  const data = {
+    transactionDate: tx.transactionDate,
+    fromAccount: tx.fromAccount?.toString(),
+    toAccount: tx.toAccount?.toString() || null,
+    category: tx.category?.toString() || null,
+    amount: tx.amount,
+    description: tx.description || '',
+    notes: tx.notes || '',
+    type: tx.type || null,
+    isDeleted: tx.isDeleted || false
+  };
+  const str = JSON.stringify(data);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(16);
+}
 
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
@@ -145,9 +167,14 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
+      const updateData = {
+        ...req.body,
+        updatedAt: Date.now()
+      };
+      
       const transaction = await Transaction.findOneAndUpdate(
         addSoftDeleteFilter({ _id: req.params.id }),
-        req.body,
+        updateData,
         { new: true }
       )
         .populate("fromAccount")
@@ -246,6 +273,64 @@ export default {
       });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
+    }
+  }
+  ,
+  // Pull changed transactions since last sync
+  syncPull: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { lastSyncTimestamp = 0, transactionHashes } = req.body;
+      const since = new Date(lastSyncTimestamp);
+      const changed = await Transaction.find({ updatedAt: { $gt: since } }).sort({ updatedAt: 1 });
+      const filtered = Array.isArray(changed)
+        ? changed.filter(tx => {
+            const id = (tx as any)._id.toString();
+            const serverHash = generateTransactionHash(tx);
+            return !transactionHashes || (transactionHashes as any)[id] !== serverHash;
+          })
+        : [];
+      res.json({
+        transactions: filtered.map(tx => {
+          const obj = transformTransactionForFrontend(tx);
+          return {
+            ...obj,
+            updatedAt: (tx as any).updatedAt,
+            hash: generateTransactionHash(tx)
+          };
+        }),
+        timestamp: Date.now()
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+  ,
+  // Push local transaction changes to server
+  syncPush: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { transactions } = req.body;
+      const timestamp = Date.now();
+      const accepted: string[] = [];
+      for (const data of transactions) {
+        const id = data.id;
+        let existing = await Transaction.findById(id);
+        if (!existing) {
+          const created = new Transaction({ _id: id, ...data });
+          await created.save();
+          accepted.push(id);
+        } else {
+          const serverHash = generateTransactionHash(existing);
+          if (data.updatedAt > (existing as any).updatedAt || data.hash !== serverHash) {
+            Object.assign(existing, data);
+            (existing as any).updatedAt = data.updatedAt;
+            await existing.save();
+            accepted.push(id);
+          }
+        }
+      }
+      res.json({ success: true, timestamp, accepted });
+    } catch (err) {
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   }
 };

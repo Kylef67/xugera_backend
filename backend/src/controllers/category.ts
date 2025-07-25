@@ -22,6 +22,26 @@ function transformCategoryForFrontend(category: any): any {
   delete transformed.__v;
   return transformed;
 }
+// Helper to generate a simple hash for category content comparison
+function generateCategoryHash(category: any): string {
+  const data = {
+    name: category.name,
+    description: category.description,
+    icon: category.icon,
+    color: (category as any).color,
+    type: category.type,
+    parent: category.parent || null,
+    isDeleted: (category as any).isDeleted || false
+  };
+  const str = JSON.stringify(data);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(16);
+}
 
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
@@ -153,7 +173,12 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
-      const category = await Category.findByIdAndUpdate(req.params.id, req.body, {
+      const updateData = {
+        ...req.body,
+        updatedAt: Date.now()
+      };
+      
+      const category = await Category.findByIdAndUpdate(req.params.id, updateData, {
         new: true,
       });
       if (!category) {
@@ -310,6 +335,80 @@ export default {
       });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
+    }
+  }
+  ,
+  // Update ordering of categories
+  updateOrder: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { categories } = req.body;
+      if (!Array.isArray(categories)) {
+        res.status(400).json({ error: 'Categories must be an array' });
+        return;
+      }
+      await Promise.all(categories.map(async (item: any) => {
+        if (!item.id || typeof item.order !== 'number') throw new Error('Each category must have id and order');
+        await Category.findByIdAndUpdate(item.id, { order: item.order, parent: item.parent || null, updatedAt: Date.now() });
+      }));
+      res.json({ success: true, message: translate('categories.order_updated', req.lang) });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  }
+  ,
+  // Pull changed categories since last sync
+  syncPull: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { lastSyncTimestamp = 0, categoryHashes } = req.body;
+      const changed = await Category.find({ updatedAt: { $gt: lastSyncTimestamp } }).sort({ updatedAt: 1 });
+      const filtered = Array.isArray(changed)
+        ? changed.filter(cat => {
+            const id = (cat as any)._id.toString();
+            const serverHash = generateCategoryHash(cat);
+            return !categoryHashes || (categoryHashes as any)[id] !== serverHash;
+          })
+        : [];
+      res.json({
+        categories: filtered.map(cat => {
+          const base = transformCategoryForFrontend(cat);
+          return {
+            ...base,
+            updatedAt: (cat as any).updatedAt,
+            hash: generateCategoryHash(cat)
+          };
+        }),
+        timestamp: Date.now()
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+  ,
+  // Push local category changes to server
+  syncPush: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { categories } = req.body;
+      const timestamp = Date.now();
+      const accepted: string[] = [];
+      for (const data of categories) {
+        const id = data.id;
+        const existing = await Category.findById(id);
+        if (!existing) {
+          await new Category({ _id: id, ...data }).save();
+          accepted.push(id);
+        } else {
+          const serverHash = generateCategoryHash(existing);
+          if (data.updatedAt > (existing as any).updatedAt || data.hash !== serverHash) {
+            Object.assign(existing, data);
+            (existing as any).updatedAt = data.updatedAt;
+            await existing.save();
+            accepted.push(id);
+          }
+        }
+      }
+      res.json({ success: true, timestamp, accepted });
+    } catch (err) {
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   }
 }; 

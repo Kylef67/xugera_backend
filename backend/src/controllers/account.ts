@@ -160,7 +160,12 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
-      const account = await Account.findByIdAndUpdate(req.params.id, req.body, {
+      const updateData = {
+        ...req.body,
+        updatedAt: Date.now()
+      };
+      
+      const account = await Account.findByIdAndUpdate(req.params.id, updateData, {
         new: true,
       });
       if (!account) {

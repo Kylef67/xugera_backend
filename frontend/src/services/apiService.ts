@@ -47,9 +47,16 @@ class ApiService {
       headers?: Record<string, string>;
     } = {}
   ): Promise<ApiResponse<T>> {
+    const { method = 'GET', body, headers = {} } = options;
+    
+    console.log(`🌐 API Request: ${method} ${this.baseUrl}${endpoint}`, {
+      method,
+      endpoint,
+      body,
+      headers
+    });
+    
     try {
-      const { method = 'GET', body, headers = {} } = options;
-      
       const config: RequestInit = {
         method,
         headers: {
@@ -66,6 +73,12 @@ class ApiService {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error(`❌ API Error: ${method} ${endpoint}`, JSON.stringify({
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        }));
+        
         return {
           success: false,
           error: errorData.error || `HTTP ${response.status}: ${response.statusText}`,
@@ -73,11 +86,20 @@ class ApiService {
       }
 
       const data = await response.json();
+      console.log(`✅ API Success: ${method} ${endpoint}`, {
+        response: data
+      });
+      
       return {
         success: true,
         data,
       };
     } catch (error) {
+      console.error(`❌ API Exception: ${method} ${endpoint}`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred',

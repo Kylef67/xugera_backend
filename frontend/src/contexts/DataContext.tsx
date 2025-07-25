@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { apiService, Category as ApiCategory, Transaction as ApiTransaction } from '../services/apiService';
 import { generateObjectId } from '../utils/objectId';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
 export type Account = {
   id: string;
@@ -81,6 +83,13 @@ interface DataContextType {
   refreshTransactions: () => Promise<void>;
 }
 
+// Define sync operation type
+interface SyncOperation {
+  type: string;
+  payload: any;
+  timestamp: number;
+}
+
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -89,10 +98,49 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncQueue, setSyncQueue] = useState<SyncOperation[]>([]);
+  const [isOnline, setIsOnline] = useState<boolean>(true);
 
+  // Load local data and queue on mount
   useEffect(() => {
-    refreshData();
+    const init = async () => {
+      // load stored data
+      const storedData = await AsyncStorage.getItem('localData');
+      if (storedData) {
+        const { accounts: a, categories: c, transactions: t } = JSON.parse(storedData);
+        if (a) setAccounts(a);
+        if (c) setCategories(c);
+        if (t) setTransactions(t);
+      }
+      // load queue
+      const storedQueue = await AsyncStorage.getItem('syncQueue');
+      if (storedQueue) {
+        setSyncQueue(JSON.parse(storedQueue));
+      }
+    };
+    init();
   }, []);
+
+  // Listen to network changes
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(Boolean(state.isConnected));
+      if (state.isConnected) {
+        syncQueueToServer();
+      }
+    });
+    return () => unsubscribe();
+  }, [syncQueue]);
+
+  // Persist local data on change
+  useEffect(() => {
+    AsyncStorage.setItem('localData', JSON.stringify({ accounts, categories, transactions }));
+  }, [accounts, categories, transactions]);
+
+  // Persist queue on change
+  useEffect(() => {
+    AsyncStorage.setItem('syncQueue', JSON.stringify(syncQueue));
+  }, [syncQueue]);
 
   const refreshData = async () => {
     await Promise.all([
@@ -227,7 +275,105 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // helper to add operation to queue
+  const addToQueue = async (op: SyncOperation) => {
+    console.log('🔄 OFFLINE: Adding operation to queue', {
+      type: op.type,
+      payload: op.payload,
+      timestamp: op.timestamp,
+      queueLength: syncQueue.length + 1
+    });
+    setSyncQueue(prev => [...prev, op]);
+  };
+
+  // helper to process queue
+  const syncQueueToServer = async () => {
+    const queue = [...syncQueue];
+    console.log('🌐 ONLINE: Starting sync process', {
+      queueLength: queue.length,
+      operations: queue.map(op => ({ type: op.type, timestamp: op.timestamp }))
+    });
+    
+    for (const op of queue) {
+      try {
+        console.log('📤 SYNC: Processing operation', {
+          type: op.type,
+          payload: op.payload,
+          timestamp: op.timestamp
+        });
+        
+        let result;
+        switch (op.type) {
+          case 'addAccount':
+            result = await apiService.createAccount(op.payload);
+            break;
+          case 'updateAccount':
+            result = await apiService.updateAccount(op.payload.id, op.payload.updates);
+            break;
+          case 'deleteAccount':
+            result = await apiService.deleteAccount(op.payload.id);
+            break;
+          case 'addCategory':
+            result = await apiService.createCategory(op.payload);
+            break;
+          case 'updateCategory':
+            result = await apiService.updateCategory(op.payload.id, op.payload.updates);
+            break;
+          case 'deleteCategory':
+            result = await apiService.deleteCategory(op.payload.id);
+            break;
+          case 'addTransaction':
+            result = await apiService.createTransaction(op.payload);
+            break;
+          case 'updateTransaction':
+            result = await apiService.updateTransaction(op.payload.id, op.payload.updates);
+            break;
+          case 'deleteTransaction':
+            result = await apiService.deleteTransaction(op.payload.id);
+            break;
+          default:
+            break;
+        }
+        
+        console.log('✅ SYNC: Operation completed successfully', {
+          type: op.type,
+          timestamp: op.timestamp,
+          response: result
+        });
+        
+        // remove processed op
+        setSyncQueue(prev => prev.filter(item => item.timestamp !== op.timestamp));
+      } catch (err) {
+        console.error('❌ SYNC: Operation failed', {
+          type: op.type,
+          timestamp: op.timestamp,
+          payload: op.payload,
+          error: err
+        });
+        break; // stop on first failure
+      }
+    }
+    
+    console.log('🔄 SYNC: Refreshing data after sync');
+    // refresh data after sync
+    await refreshData();
+  };
+
+  // wrap operations to handle offline mode
   const addAccount = async (account: Account) => {
+    if (!isOnline) {
+      const tempId = generateObjectId();
+      const localAccount = { ...account, id: tempId };
+      console.log('🔄 OFFLINE: Adding account locally', {
+        account: localAccount,
+        queueLength: syncQueue.length
+      });
+      setAccounts(prev => [...prev, localAccount]);
+      await addToQueue({ type: 'addAccount', payload: { ...account, id: tempId }, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Creating account via API', { account });
     try {
       setLoading(true);
       setError(null);
@@ -244,13 +390,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         order: account.order,
       });
 
+      console.log('✅ ONLINE: Account created successfully', { 
+        request: account,
+        response: result 
+      });
+
       if (result.success) {
         await refreshAccounts();
       } else {
+        console.error('❌ ONLINE: Failed to create account', { error: result.error });
         setError(result.error || 'Failed to create account');
       }
     } catch (error) {
-      console.error('Failed to add account:', error);
+      console.error('❌ ONLINE: Exception creating account', { error, account });
       setError('Failed to add account');
     } finally {
       setLoading(false);
@@ -258,6 +410,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateAccount = async (updatedAccount: Account) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Updating account locally', {
+        account: updatedAccount,
+        queueLength: syncQueue.length
+      });
+      setAccounts(prev => prev.map(a => a.id === updatedAccount.id ? updatedAccount : a));
+      await addToQueue({ type: 'updateAccount', payload: { id: updatedAccount.id, updates: updatedAccount }, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Updating account via API', { account: updatedAccount });
     try {
       setLoading(true);
       setError(null);
@@ -274,13 +437,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         order: updatedAccount.order,
       });
 
+      console.log('✅ ONLINE: Account updated successfully', { 
+        request: updatedAccount,
+        response: result 
+      });
+
       if (result.success) {
         await refreshAccounts();
       } else {
+        console.error('❌ ONLINE: Failed to update account', { error: result.error });
         setError(result.error || 'Failed to update account');
       }
     } catch (error) {
-      console.error('Failed to update account:', error);
+      console.error('❌ ONLINE: Exception updating account', { error, account: updatedAccount });
       setError('Failed to update account');
     } finally {
       setLoading(false);
@@ -288,19 +457,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteAccount = async (id: string) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Deleting account locally', {
+        accountId: id,
+        queueLength: syncQueue.length
+      });
+      setAccounts(prev => prev.filter(a => a.id !== id));
+      await addToQueue({ type: 'deleteAccount', payload: { id }, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Deleting account via API', { accountId: id });
     try {
       setLoading(true);
       setError(null);
       
       const result = await apiService.deleteAccount(id);
 
+      console.log('✅ ONLINE: Account deleted successfully', { 
+        request: { id },
+        response: result 
+      });
+
       if (result.success) {
         await refreshAccounts();
       } else {
+        console.error('❌ ONLINE: Failed to delete account', { error: result.error });
         setError(result.error || 'Failed to delete account');
       }
     } catch (error) {
-      console.error('Failed to delete account:', error);
+      console.error('❌ ONLINE: Exception deleting account', { error, accountId: id });
       setError('Failed to delete account');
     } finally {
       setLoading(false);
@@ -339,6 +525,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addCategory = async (category: Category) => {
+    if (!isOnline) {
+      const tempId = generateObjectId();
+      const localCategory = { ...category, id: tempId };
+      console.log('🔄 OFFLINE: Adding category locally', {
+        category: localCategory,
+        queueLength: syncQueue.length
+      });
+      setCategories(prev => [...prev, localCategory]);
+      await addToQueue({ type: 'addCategory', payload: { ...category, id: tempId }, timestamp: Date.now() });
+      return;
+    }
+
+    console.log('🌐 ONLINE: Creating category via API', { category });
     try {
       setLoading(true);
       setError(null);
@@ -352,13 +551,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         parent: category.parent,
       });
 
+      console.log('✅ ONLINE: Category created successfully', { 
+        request: category,
+        response: result 
+      });
+
       if (result.success) {
         await refreshCategories();
       } else {
+        console.error('❌ ONLINE: Failed to create category', { error: result.error });
         setError(result.error || 'Failed to create category');
       }
     } catch (error) {
-      console.error('Failed to add category:', error);
+      console.error('❌ ONLINE: Exception creating category', { error, category });
       setError('Failed to add category');
     } finally {
       setLoading(false);
@@ -366,6 +571,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateCategory = async (updatedCategory: Category) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Updating category locally', {
+        category: updatedCategory,
+        queueLength: syncQueue.length
+      });
+      setCategories(prev => prev.map(c => c.id === updatedCategory.id ? updatedCategory : c));
+      await addToQueue({ type: 'updateCategory', payload: { id: updatedCategory.id, updates: updatedCategory }, timestamp: Date.now() });
+      return;
+    }
+
+    console.log('🌐 ONLINE: Updating category via API', { category: updatedCategory });
     try {
       setLoading(true);
       setError(null);
@@ -379,13 +595,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         parent: updatedCategory.parent,
       });
 
+      console.log('✅ ONLINE: Category updated successfully', { 
+        request: updatedCategory,
+        response: result 
+      });
+
       if (result.success) {
         await refreshCategories();
       } else {
+        console.error('❌ ONLINE: Failed to update category', { error: result.error });
         setError(result.error || 'Failed to update category');
       }
     } catch (error) {
-      console.error('Failed to update category:', error);
+      console.error('❌ ONLINE: Exception updating category', { error, category: updatedCategory });
       setError('Failed to update category');
     } finally {
       setLoading(false);
@@ -393,19 +615,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteCategory = async (id: string) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Deleting category locally', {
+        categoryId: id,
+        queueLength: syncQueue.length
+      });
+      setCategories(prev => prev.filter(c => c.id !== id));
+      await addToQueue({ type: 'deleteCategory', payload: { id }, timestamp: Date.now() });
+      return;
+    }
+
+    console.log('🌐 ONLINE: Deleting category via API', { categoryId: id });
     try {
       setLoading(true);
       setError(null);
       
       const result = await apiService.deleteCategory(id);
 
+      console.log('✅ ONLINE: Category deleted successfully', { 
+        request: { id },
+        response: result 
+      });
+
       if (result.success) {
         await refreshCategories();
       } else {
+        console.error('❌ ONLINE: Failed to delete category', { error: result.error });
         setError(result.error || 'Failed to delete category');
       }
     } catch (error) {
-      console.error('Failed to delete category:', error);
+      console.error('❌ ONLINE: Exception deleting category', { error, categoryId: id });
       setError('Failed to delete category');
     } finally {
       setLoading(false);
@@ -452,6 +691,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addTransaction = async (transaction: Transaction) => {
+    if (!isOnline) {
+      const tempId = generateObjectId();
+      const payload = {
+        ...transaction,
+        id: tempId
+      };
+      console.log('🔄 OFFLINE: Adding transaction locally', {
+        transaction: payload,
+        queueLength: syncQueue.length
+      });
+      // update local state optimistically
+      setTransactions(prev => [...prev, payload]);
+      await addToQueue({ type: 'addTransaction', payload, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Creating transaction via API', { transaction });
     try {
       setLoading(true);
       setError(null);
@@ -478,13 +734,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         type: transaction.type,
       });
 
+      console.log('✅ ONLINE: Transaction created successfully', { 
+        request: transaction,
+        response: result 
+      });
+
       if (result.success) {
         await refreshTransactions();
       } else {
+        console.error('❌ ONLINE: Failed to create transaction', { error: result.error });
         setError(result.error || 'Failed to create transaction');
       }
     } catch (error) {
-      console.error('Failed to add transaction:', error);
+      console.error('❌ ONLINE: Exception creating transaction', { error, transaction });
       setError('Failed to add transaction');
     } finally {
       setLoading(false);
@@ -492,6 +754,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateTransaction = async (updatedTransaction: Transaction) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Updating transaction locally', {
+        transaction: updatedTransaction,
+        queueLength: syncQueue.length
+      });
+      // update local state optimistically
+      setTransactions(prev => prev.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx));
+      await addToQueue({ type: 'updateTransaction', payload: { id: updatedTransaction.id, updates: updatedTransaction }, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Updating transaction via API', { transaction: updatedTransaction });
     try {
       setLoading(true);
       setError(null);
@@ -519,13 +793,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isDeleted: updatedTransaction.isDeleted,
       });
 
+      console.log('✅ ONLINE: Transaction updated successfully', { 
+        request: updatedTransaction,
+        response: result 
+      });
+
       if (result.success) {
         await refreshTransactions();
       } else {
+        console.error('❌ ONLINE: Failed to update transaction', { error: result.error });
         setError(result.error || 'Failed to update transaction');
       }
     } catch (error) {
-      console.error('Failed to update transaction:', error);
+      console.error('❌ ONLINE: Exception updating transaction', { error, transaction: updatedTransaction });
       setError('Failed to update transaction');
     } finally {
       setLoading(false);
@@ -533,19 +813,37 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteTransaction = async (id: string) => {
+    if (!isOnline) {
+      console.log('🔄 OFFLINE: Deleting transaction locally', {
+        transactionId: id,
+        queueLength: syncQueue.length
+      });
+      // update local state optimistically
+      setTransactions(prev => prev.filter(tx => tx.id !== id));
+      await addToQueue({ type: 'deleteTransaction', payload: { id }, timestamp: Date.now() });
+      return;
+    }
+    
+    console.log('🌐 ONLINE: Deleting transaction via API', { transactionId: id });
     try {
       setLoading(true);
       setError(null);
       
       const result = await apiService.deleteTransaction(id);
 
+      console.log('✅ ONLINE: Transaction deleted successfully', { 
+        request: { id },
+        response: result 
+      });
+
       if (result.success) {
         await refreshTransactions();
       } else {
+        console.error('❌ ONLINE: Failed to delete transaction', { error: result.error });
         setError(result.error || 'Failed to delete transaction');
       }
     } catch (error) {
-      console.error('Failed to delete transaction:', error);
+      console.error('❌ ONLINE: Exception deleting transaction', { error, transactionId: id });
       setError('Failed to delete transaction');
     } finally {
       setLoading(false);
@@ -613,4 +911,4 @@ export const useData = () => {
     throw new Error('useData must be used within a DataProvider');
   }
   return context;
-}; 
+};
