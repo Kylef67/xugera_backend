@@ -26,6 +26,10 @@ export type Category = {
   type: 'Income' | 'Expense';
   description?: string;
   parent?: string | null;
+  balance?: number; // Total balance including subcategories
+  directBalance?: number; // Balance from direct transactions only
+  transactionCount?: number; // Total transaction count including subcategories
+  directTransactionCount?: number; // Direct transaction count only
   subcategories?: Category[];
   transactions?: {
     direct: { total: number; count: number };
@@ -34,7 +38,6 @@ export type Category = {
   };
   // Legacy fields for backward compatibility
   amount?: number;
-  transactionCount?: number;
 };
 
 export type Transaction = {
@@ -81,6 +84,9 @@ interface DataContextType {
   refreshData: () => Promise<void>;
   refreshCategories: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
+  recalculateAccountBalances: () => void;
+  recalculateCategoryBalances: () => void;
+  recalculateAllBalances: () => void;
 }
 
 // Define sync operation type
@@ -137,10 +143,147 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AsyncStorage.setItem('localData', JSON.stringify({ accounts, categories, transactions }));
   }, [accounts, categories, transactions]);
 
-  // Persist queue on change
+  // Helper function to calculate account balance from transactions
+  const calculateAccountBalance = (accountId: string, transactions: Transaction[]): number => {
+    let balance = 0;
+    
+    transactions.forEach(transaction => {
+      if (transaction.isDeleted) return; // Skip deleted transactions
+      
+      const fromAccountId = typeof transaction.fromAccount === 'object' 
+        ? transaction.fromAccount.id 
+        : transaction.fromAccount;
+      const toAccountId = typeof transaction.toAccount === 'object' 
+        ? transaction.toAccount?.id 
+        : transaction.toAccount;
+      
+      if (transaction.type === 'income' && fromAccountId === accountId) {
+        balance += transaction.amount;
+      } else if (transaction.type === 'expense' && fromAccountId === accountId) {
+        balance -= transaction.amount;
+      } else if (transaction.type === 'transfer') {
+        if (fromAccountId === accountId) {
+          balance -= transaction.amount; // Transfer out
+        }
+        if (toAccountId === accountId) {
+          balance += transaction.amount; // Transfer in
+        }
+      }
+    });
+    
+    return balance;
+  };
+
+  // Helper function to update account balances based on current transactions
+  const updateAccountBalances = (currentAccounts: Account[], currentTransactions: Transaction[]): Account[] => {
+    return currentAccounts.map(account => ({
+      ...account,
+      balance: calculateAccountBalance(account.id, currentTransactions)
+    }));
+  };
+
+  // Helper function to calculate category balances from transactions
+  const calculateCategoryBalance = (categoryId: string, transactions: Transaction[], includeSubcategories: boolean = true): { balance: number; count: number } => {
+    let balance = 0;
+    let count = 0;
+    
+    // Get all descendant category IDs if including subcategories
+    const categoriesToInclude = includeSubcategories ? getAllDescendantCategoryIds(categoryId) : [categoryId];
+    
+    transactions.forEach(transaction => {
+      if (transaction.isDeleted) return; // Skip deleted transactions
+      
+      const transactionCategoryId = typeof transaction.category === 'object' 
+        ? transaction.category?.id 
+        : transaction.category;
+      
+      if (transactionCategoryId && categoriesToInclude.includes(transactionCategoryId)) {
+        balance += transaction.amount;
+        count++;
+      }
+    });
+    
+    return { balance, count };
+  };
+
+  // Helper function to get all descendant category IDs
+  const getAllDescendantCategoryIds = (parentId: string): string[] => {
+    const descendants = [parentId];
+    const queue = [parentId];
+    
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      const children = categories.filter(cat => cat.parent === currentId);
+      
+      children.forEach(child => {
+        descendants.push(child.id);
+        queue.push(child.id);
+      });
+    }
+    
+    return descendants;
+  };
+
+  // Helper function to update category balances based on current transactions
+  const updateCategoryBalances = (currentCategories: Category[], currentTransactions: Transaction[]): Category[] => {
+    return currentCategories.map(category => {
+      const directBalance = calculateCategoryBalance(category.id, currentTransactions, false);
+      const totalBalance = calculateCategoryBalance(category.id, currentTransactions, true);
+      
+      return {
+        ...category,
+        directBalance: directBalance.balance,
+        directTransactionCount: directBalance.count,
+        balance: totalBalance.balance,
+        transactionCount: totalBalance.count,
+        // Update legacy fields for backward compatibility
+        amount: totalBalance.balance,
+        transactions: {
+          direct: { total: directBalance.balance, count: directBalance.count },
+          subcategories: { 
+            total: totalBalance.balance - directBalance.balance, 
+            count: totalBalance.count - directBalance.count 
+          },
+          all: { total: totalBalance.balance, count: totalBalance.count }
+        }
+      };
+    });
+  };
+
+  // Update category balances whenever transactions change
   useEffect(() => {
-    AsyncStorage.setItem('syncQueue', JSON.stringify(syncQueue));
-  }, [syncQueue]);
+    if (transactions.length > 0 && categories.length > 0) {
+      const updatedCategories = updateCategoryBalances(categories, transactions);
+      
+      // Only update if balances actually changed to avoid infinite loops
+      const balancesChanged = updatedCategories.some((category, index) => 
+        Math.abs((category.balance || 0) - (categories[index].balance || 0)) > 0.01 ||
+        (category.transactionCount || 0) !== (categories[index].transactionCount || 0)
+      );
+      
+      if (balancesChanged) {
+        console.log('📊 CATEGORY BALANCE UPDATE: Recalculating category balances from transactions');
+        setCategories(updatedCategories);
+      }
+    }
+  }, [transactions]); // Only depend on transactions to avoid circular updates
+
+  // Update account balances whenever transactions change
+  useEffect(() => {
+    if (transactions.length > 0 && accounts.length > 0) {
+      const updatedAccounts = updateAccountBalances(accounts, transactions);
+      
+      // Only update if balances actually changed to avoid infinite loops
+      const balancesChanged = updatedAccounts.some((account, index) => 
+        Math.abs(account.balance - accounts[index].balance) > 0.01
+      );
+      
+      if (balancesChanged) {
+        console.log('📊 ACCOUNT BALANCE UPDATE: Recalculating account balances from transactions');
+        setAccounts(updatedAccounts);
+      }
+    }
+  }, [transactions]); // Only depend on transactions to avoid circular updates
 
   const refreshData = async () => {
     await Promise.all([
@@ -192,6 +335,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           type: apiCategory.type || 'Expense', // Default type if not provided
           description: apiCategory.description,
           parent: apiCategory.parent,
+          balance: apiCategory.balance || 0,
+          directBalance: apiCategory.directBalance || 0,
+          transactionCount: apiCategory.transactionCount || 0,
+          directTransactionCount: apiCategory.directTransactionCount || 0,
           subcategories: apiCategory.subcategories?.map(sub => ({
             id: sub.id,
             name: sub.name,
@@ -200,12 +347,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             type: sub.type || 'Expense',
             description: sub.description,
             parent: sub.parent,
+            balance: sub.balance || 0,
+            directBalance: sub.directBalance || 0,
+            transactionCount: sub.transactionCount || 0,
+            directTransactionCount: sub.directTransactionCount || 0,
             transactions: sub.transactions,
           })) || [],
           transactions: apiCategory.transactions,
           // Legacy compatibility fields
-          amount: apiCategory.transactions?.all.total || 0,
-          transactionCount: apiCategory.transactions?.all.count || 0,
+          amount: apiCategory.transactions?.all.total || apiCategory.balance || 0,
         }));
         
         setCategories(transformedCategories);
@@ -702,7 +852,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         queueLength: syncQueue.length
       });
       // update local state optimistically
-      setTransactions(prev => [...prev, payload]);
+      const newTransactions = [...transactions, payload];
+      setTransactions(newTransactions);
+      
+      // Update account and category balances immediately when offline
+      const updatedAccounts = updateAccountBalances(accounts, newTransactions);
+      const updatedCategories = updateCategoryBalances(categories, newTransactions);
+      setAccounts(updatedAccounts);
+      setCategories(updatedCategories);
+      
       await addToQueue({ type: 'addTransaction', payload, timestamp: Date.now() });
       return;
     }
@@ -741,6 +899,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (result.success) {
         await refreshTransactions();
+        // Note: Account balances will be automatically updated via the useEffect hook
+        // when transactions are refreshed, ensuring consistency
       } else {
         console.error('❌ ONLINE: Failed to create transaction', { error: result.error });
         setError(result.error || 'Failed to create transaction');
@@ -760,7 +920,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         queueLength: syncQueue.length
       });
       // update local state optimistically
-      setTransactions(prev => prev.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx));
+      const newTransactions = transactions.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx);
+      setTransactions(newTransactions);
+      
+      // Update account and category balances immediately when offline
+      const updatedAccounts = updateAccountBalances(accounts, newTransactions);
+      const updatedCategories = updateCategoryBalances(categories, newTransactions);
+      setAccounts(updatedAccounts);
+      setCategories(updatedCategories);
+      
       await addToQueue({ type: 'updateTransaction', payload: { id: updatedTransaction.id, updates: updatedTransaction }, timestamp: Date.now() });
       return;
     }
@@ -819,7 +987,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         queueLength: syncQueue.length
       });
       // update local state optimistically
-      setTransactions(prev => prev.filter(tx => tx.id !== id));
+      const newTransactions = transactions.filter(tx => tx.id !== id);
+      setTransactions(newTransactions);
+      
+      // Update account and category balances immediately when offline
+      const updatedAccounts = updateAccountBalances(accounts, newTransactions);
+      const updatedCategories = updateCategoryBalances(categories, newTransactions);
+      setAccounts(updatedAccounts);
+      setCategories(updatedCategories);
+      
       await addToQueue({ type: 'deleteTransaction', payload: { id }, timestamp: Date.now() });
       return;
     }
@@ -871,6 +1047,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      }
    };
 
+  // Manual function to recalculate account balances
+  const recalculateAccountBalances = () => {
+    console.log('🔄 MANUAL: Recalculating all account balances');
+    const updatedAccounts = updateAccountBalances(accounts, transactions);
+    setAccounts(updatedAccounts);
+  };
+
+  // Manual function to recalculate category balances
+  const recalculateCategoryBalances = () => {
+    console.log('🔄 MANUAL: Recalculating all category balances');
+    const updatedCategories = updateCategoryBalances(categories, transactions);
+    setCategories(updatedCategories);
+  };
+
+  // Manual function to recalculate all balances
+  const recalculateAllBalances = () => {
+    console.log('🔄 MANUAL: Recalculating all account and category balances');
+    const updatedAccounts = updateAccountBalances(accounts, transactions);
+    const updatedCategories = updateCategoryBalances(categories, transactions);
+    setAccounts(updatedAccounts);
+    setCategories(updatedCategories);
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -898,6 +1097,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         refreshData,
         refreshCategories,
         refreshTransactions,
+        recalculateAccountBalances,
+        recalculateCategoryBalances,
+        recalculateAllBalances,
       }}
     >
       {children}
