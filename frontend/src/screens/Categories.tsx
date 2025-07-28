@@ -8,7 +8,14 @@ import CategoryDetails from './CategoryDetails';
 import { useData, Category } from '../contexts/DataContext';
 
 export default function Categories() {
-  const { categories, addCategory, updateCategory, loading, error } = useData();
+  const { 
+    categories, 
+    addCategory, 
+    updateCategory, 
+    loading, 
+    error, 
+    isInitialized 
+  } = useData();
   const [dateSelection, setDateSelection] = useState<DateRangeSelection>({
     mode: 'month',
     displayText: 'OCTOBER 2024',

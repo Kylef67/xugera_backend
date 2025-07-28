@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { apiService, Category as ApiCategory, Transaction as ApiTransaction } from '../services/apiService';
 import { generateObjectId } from '../utils/objectId';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import { DatabaseInterface, databaseService } from '../services/database';
 
 export type Account = {
   id: string;
@@ -59,6 +60,8 @@ interface DataContextType {
   transactions: Transaction[];
   loading: boolean;
   error: string | null;
+  isInitialized: boolean;
+  isLoadingData: boolean;
   setAccounts: (accounts: Account[]) => void;
   setCategories: (categories: Category[]) => void;
   setTransactions: (transactions: Transaction[]) => void;
@@ -87,6 +90,7 @@ interface DataContextType {
   recalculateAccountBalances: () => void;
   recalculateCategoryBalances: () => void;
   recalculateAllBalances: () => void;
+  resetDatabase: () => Promise<void>;
 }
 
 // Define sync operation type
@@ -106,37 +110,97 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [error, setError] = useState<string | null>(null);
   const [syncQueue, setSyncQueue] = useState<SyncOperation[]>([]);
   const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
 
-  // Load local data and queue on mount
+  // Use ref to track sync queue to avoid recreating NetInfo listener
+  const syncQueueRef = useRef<SyncOperation[]>([]);
+  
+  // Update ref whenever syncQueue changes
+  useEffect(() => {
+    syncQueueRef.current = syncQueue;
+  }, [syncQueue]);
+
+  // Load local data and queue on mount, then fetch fresh data
   useEffect(() => {
     const init = async () => {
-      // load stored data
-      const storedData = await AsyncStorage.getItem('localData');
-      if (storedData) {
-        const { accounts: a, categories: c, transactions: t } = JSON.parse(storedData);
-        if (a) setAccounts(a);
-        if (c) setCategories(c);
-        if (t) setTransactions(t);
-      }
-      // load queue
-      const storedQueue = await AsyncStorage.getItem('syncQueue');
-      if (storedQueue) {
-        setSyncQueue(JSON.parse(storedQueue));
+      try {
+        // Initialize database
+        console.log('🔧 DATABASE: Initializing database service');
+        await databaseService.initialize();
+        
+        // Load data from database (SQLite on mobile, AsyncStorage on web)
+        console.log('📱 DATABASE: Loading data from offline storage');
+        const dbAccounts = await databaseService.getAllAccounts();
+        if (dbAccounts.length > 0) {
+          setAccounts(dbAccounts);
+          console.log('📱 DATABASE: Loaded accounts from database', { count: dbAccounts.length });
+        }
+        
+        // Fallback to AsyncStorage for categories and transactions (for now)
+        const storedData = await AsyncStorage.getItem('localData');
+        if (storedData) {
+          const { categories: c, transactions: t } = JSON.parse(storedData);
+          if (c) setCategories(c);
+          if (t) setTransactions(t);
+          console.log('📱 ASYNC_STORAGE: Loaded cached data', { categories: c?.length, transactions: t?.length });
+        }
+        
+        // load queue
+        const storedQueue = await AsyncStorage.getItem('syncQueue');
+        if (storedQueue) {
+          setSyncQueue(JSON.parse(storedQueue));
+        }
+        
+        setIsInitialized(true);
+        
+        // Fetch fresh data from API if online (only on initial load)
+        console.log('🚀 INITIAL LOAD: Fetching fresh data from API');
+        await refreshData();
+      } catch (error) {
+        console.error('❌ INIT: Failed to initialize data context', error);
+        
+        // If database initialization fails, try to reset it
+        if (error instanceof Error && (error.message?.includes('no such column') || error.message?.includes('has no column named'))) {
+          console.log('🔧 DATABASE: Schema error detected, attempting to reset database');
+          try {
+            await databaseService.resetDatabase();
+            console.log('✅ DATABASE: Database reset successful');
+            
+            // Load from AsyncStorage as fallback
+            const storedData = await AsyncStorage.getItem('localData');
+            if (storedData) {
+              const { accounts: a, categories: c, transactions: t } = JSON.parse(storedData);
+              if (a) setAccounts(a);
+              if (c) setCategories(c);
+              if (t) setTransactions(t);
+              console.log('📱 FALLBACK: Loaded data from AsyncStorage after database reset');
+            }
+            
+          } catch (resetError) {
+            console.error('❌ DATABASE: Failed to reset database', resetError);
+          }
+        }
+        
+        setError('Failed to initialize app data');
+        setIsInitialized(true);
       }
     };
     init();
-  }, []);
+  }, []); // No dependencies - only run once on mount
 
   // Listen to network changes
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       setIsOnline(Boolean(state.isConnected));
-      if (state.isConnected) {
-        syncQueueToServer();
+      if (state.isConnected && syncQueueRef.current.length > 0) {
+        console.log('🌐 NETWORK: Connection restored, syncing queue', { queueLength: syncQueueRef.current.length });
+        // Call sync function asynchronously to avoid dependency issues
+        setTimeout(() => syncQueueToServer(), 0);
       }
     });
     return () => unsubscribe();
-  }, [syncQueue]);
+  }, []); // Remove syncQueue dependency to prevent listener recreation
 
   // Persist local data on change
   useEffect(() => {
@@ -251,51 +315,177 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Update category balances whenever transactions change
-  useEffect(() => {
-    if (transactions.length > 0 && categories.length > 0) {
-      const updatedCategories = updateCategoryBalances(categories, transactions);
-      
-      // Only update if balances actually changed to avoid infinite loops
-      const balancesChanged = updatedCategories.some((category, index) => 
-        Math.abs((category.balance || 0) - (categories[index].balance || 0)) > 0.01 ||
-        (category.transactionCount || 0) !== (categories[index].transactionCount || 0)
-      );
-      
-      if (balancesChanged) {
-        console.log('📊 CATEGORY BALANCE UPDATE: Recalculating category balances from transactions');
-        setCategories(updatedCategories);
-      }
-    }
-  }, [transactions]); // Only depend on transactions to avoid circular updates
+  // Removed automatic useEffect to prevent cascading updates
+  // Balance calculations now happen only after data refresh
 
-  // Update account balances whenever transactions change
-  useEffect(() => {
-    if (transactions.length > 0 && accounts.length > 0) {
-      const updatedAccounts = updateAccountBalances(accounts, transactions);
-      
-      // Only update if balances actually changed to avoid infinite loops
-      const balancesChanged = updatedAccounts.some((account, index) => 
-        Math.abs(account.balance - accounts[index].balance) > 0.01
-      );
-      
-      if (balancesChanged) {
-        console.log('📊 ACCOUNT BALANCE UPDATE: Recalculating account balances from transactions');
-        setAccounts(updatedAccounts);
-      }
-    }
-  }, [transactions]); // Only depend on transactions to avoid circular updates
+  // Update account balances whenever transactions change  
+  // Removed automatic useEffect to prevent cascading updates
+  // Balance calculations now happen only after data refresh
 
   const refreshData = async () => {
-    await Promise.all([
-      refreshAccounts(),
-      refreshCategories(),
-      refreshTransactions()
-    ]);
+    // Prevent multiple concurrent refresh calls
+    if (isLoadingData) {
+      console.log('⏸️ REFRESH: Already loading data, skipping duplicate call');
+      return;
+    }
+    
+    setIsLoadingData(true);
+    console.log('🔄 REFRESH: Starting data refresh');
+    
+    try {
+      if (isOnline) {
+        // Try to fetch from API when online
+        console.log('📡 REFRESH: Online mode - fetching from API');
+        
+        // Store the fresh data before setting state
+        let freshAccounts: Account[] = [];
+        let freshCategories: Category[] = [];
+        let freshTransactions: Transaction[] = [];
+
+        // Fetch all data and store results
+        const [accountsResult, categoriesResult, transactionsResult] = await Promise.all([
+          apiService.getAllAccounts(),
+          apiService.getAllCategories(),
+          apiService.getAllTransactions()
+        ]);
+
+        // Process accounts
+        if (accountsResult.success && accountsResult.data) {
+          freshAccounts = accountsResult.data
+            .filter(account => !account.isDeleted)
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+          
+          // Save to database
+          for (const account of freshAccounts) {
+            const syncableAccount = {
+              ...account,
+              updatedAt: Date.now(),
+              serverUpdatedAt: Date.now()
+            };
+            await databaseService.saveAccount(syncableAccount);
+          }
+          
+          console.log('✅ ACCOUNTS: Loaded accounts successfully', { count: freshAccounts.length });
+        } else {
+          console.error('❌ ACCOUNTS: Failed to fetch accounts', { error: accountsResult.error });
+          // Fall back to database
+          freshAccounts = await databaseService.getAllAccounts();
+        }
+
+        // Process categories and transactions similarly...
+        // For now, keeping the existing logic for categories and transactions
+        // TODO: Add database integration for categories and transactions
+
+        // Process categories
+        if (categoriesResult.success && categoriesResult.data) {
+          freshCategories = categoriesResult.data.map(apiCategory => ({
+          id: apiCategory.id,
+          name: apiCategory.name,
+          icon: apiCategory.icon || 'help-circle',
+          color: apiCategory.color || '#666666',
+          type: apiCategory.type || 'Expense',
+          description: apiCategory.description,
+          parent: apiCategory.parent,
+          balance: apiCategory.balance || 0,
+          directBalance: apiCategory.directBalance || 0,
+          transactionCount: apiCategory.transactionCount || 0,
+          directTransactionCount: apiCategory.directTransactionCount || 0,
+          subcategories: apiCategory.subcategories?.map(sub => ({
+            id: sub.id,
+            name: sub.name,
+            icon: sub.icon || 'help-circle',
+            color: sub.color || '#666666',
+            type: sub.type || 'Expense',
+            description: sub.description,
+            parent: sub.parent,
+            balance: sub.balance || 0,
+            directBalance: sub.directBalance || 0,
+            transactionCount: sub.transactionCount || 0,
+            directTransactionCount: sub.directTransactionCount || 0,
+            transactions: sub.transactions,
+          })) || [],
+          transactions: apiCategory.transactions,
+          amount: apiCategory.transactions?.all.total || apiCategory.balance || 0,
+        }));
+        console.log('✅ CATEGORIES: Loaded categories successfully', { count: freshCategories.length });
+      } else {
+        console.error('❌ CATEGORIES: Failed to fetch categories', { error: categoriesResult.error });
+      }
+
+      // Process transactions
+      if (transactionsResult.success && transactionsResult.data) {
+        freshTransactions = transactionsResult.data.filter(transaction => !transaction.isDeleted);
+        console.log('✅ TRANSACTIONS: Loaded transactions successfully', { count: freshTransactions.length });
+      } else {
+        console.error('❌ TRANSACTIONS: Failed to fetch transactions', { error: transactionsResult.error });
+      }
+
+      console.log('✅ REFRESH: Data refresh completed successfully');
+      
+      // Calculate balances with fresh data, not state
+      console.log('📊 REFRESH: Recalculating balances after data refresh');
+      const updatedAccounts = updateAccountBalances(freshAccounts, freshTransactions);
+      const updatedCategories = updateCategoryBalances(freshCategories, freshTransactions);
+      
+      // Set all the state at once to avoid race conditions
+      setAccounts(updatedAccounts);
+      setCategories(updatedCategories);
+      setTransactions(freshTransactions);
+      
+      } else {
+        // Offline mode - load from database only
+        console.log('📱 REFRESH: Offline mode - loading from database');
+        const dbAccounts = await databaseService.getAllAccounts();
+        setAccounts(dbAccounts);
+        
+        // For now, still use AsyncStorage for categories and transactions
+        const storedData = await AsyncStorage.getItem('localData');
+        if (storedData) {
+          const { categories: c, transactions: t } = JSON.parse(storedData);
+          if (c) setCategories(c);
+          if (t) setTransactions(t);
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ REFRESH: Failed to refresh data', error);
+      
+      // If database operation fails due to schema issues, try to reset it
+      if (error instanceof Error && (error.message?.includes('no such column') || error.message?.includes('has no column named'))) {
+        console.log('🔧 DATABASE: Schema error detected during refresh, attempting to reset database');
+        try {
+          await databaseService.resetDatabase();
+          console.log('✅ DATABASE: Database reset successful during refresh');
+          
+          // Try to reload from AsyncStorage as fallback
+          const storedData = await AsyncStorage.getItem('localData');
+          if (storedData) {
+            const { accounts: a, categories: c, transactions: t } = JSON.parse(storedData);
+            if (a) setAccounts(a);
+            if (c) setCategories(c);
+            if (t) setTransactions(t);
+            console.log('📱 FALLBACK: Loaded data from AsyncStorage after database reset during refresh');
+          }
+          
+        } catch (resetError) {
+          console.error('❌ DATABASE: Failed to reset database during refresh', resetError);
+        }
+      }
+      
+      // Always try to load from database as fallback
+      try {
+        const dbAccounts = await databaseService.getAllAccounts();
+        setAccounts(dbAccounts);
+      } catch (dbError) {
+        console.error('❌ REFRESH: Failed to load from database:', dbError);
+      }
+    } finally {
+      setIsLoadingData(false);
+    }
   };
 
   const refreshAccounts = async () => {
     try {
-      setLoading(true);
       setError(null);
       
       const result = await apiService.getAllAccounts();
@@ -307,20 +497,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           .sort((a, b) => (a.order || 0) - (b.order || 0));
         
         setAccounts(activeAccounts);
+        console.log('✅ ACCOUNTS: Loaded accounts successfully', { count: activeAccounts.length });
       } else {
         setError(result.error || 'Failed to fetch accounts');
+        console.error('❌ ACCOUNTS: Failed to fetch accounts', { error: result.error });
       }
     } catch (error) {
-      console.error('Failed to refresh accounts:', error);
+      console.error('❌ ACCOUNTS: Exception fetching accounts', error);
       setError('Failed to refresh accounts');
-    } finally {
-      setLoading(false);
     }
   };
 
   const refreshCategories = async () => {
     try {
-      setLoading(true);
       setError(null);
       
       const result = await apiService.getAllCategories();
@@ -359,19 +548,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
         
         setCategories(transformedCategories);
+        console.log('✅ CATEGORIES: Loaded categories successfully', { count: transformedCategories.length });
       } else {
         // If no categories exist, create default ones
         if (result.error?.includes('Empty')) {
           await seedDefaultCategories();
         } else {
           setError(result.error || 'Failed to fetch categories');
+          console.error('❌ CATEGORIES: Failed to fetch categories', { error: result.error });
         }
       }
     } catch (error) {
-      console.error('Failed to refresh categories:', error);
+      console.error('❌ CATEGORIES: Exception fetching categories', error);
       setError('Failed to refresh categories');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -405,7 +594,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshTransactions = async () => {
     try {
-      setLoading(true);
       setError(null);
       
       const result = await apiService.getAllTransactions();
@@ -414,14 +602,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Filter out deleted transactions
         const activeTransactions = result.data.filter(transaction => !transaction.isDeleted);
         setTransactions(activeTransactions);
+        console.log('✅ TRANSACTIONS: Loaded transactions successfully', { count: activeTransactions.length });
       } else {
         setError(result.error || 'Failed to fetch transactions');
+        console.error('❌ TRANSACTIONS: Failed to fetch transactions', { error: result.error });
       }
     } catch (error) {
-      console.error('Failed to refresh transactions:', error);
+      console.error('❌ TRANSACTIONS: Exception fetching transactions', error);
       setError('Failed to refresh transactions');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -438,11 +626,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // helper to process queue
   const syncQueueToServer = async () => {
-    const queue = [...syncQueue];
+    const queue = [...syncQueueRef.current];
     console.log('🌐 ONLINE: Starting sync process', {
       queueLength: queue.length,
       operations: queue.map(op => ({ type: op.type, timestamp: op.timestamp }))
     });
+    
+    // Don't sync if queue is empty or already syncing
+    if (queue.length === 0 || isLoadingData) {
+      console.log('⏸️ SYNC: Skipping sync - queue empty or already loading', { queueLength: queue.length, isLoading: isLoadingData });
+      return;
+    }
     
     for (const op of queue) {
       try {
@@ -504,9 +698,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     
-    console.log('🔄 SYNC: Refreshing data after sync');
-    // refresh data after sync
-    await refreshData();
+    console.log('🔄 SYNC: Sync process completed');
+    // Note: Not calling refreshData here to avoid duplicate API calls
+    // Fresh data is already loaded during app initialization
   };
 
   // wrap operations to handle offline mode
@@ -518,8 +712,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         account: localAccount,
         queueLength: syncQueue.length
       });
+      
+      // Save to database for persistence
+      const syncableAccount = {
+        ...localAccount,
+        updatedAt: Date.now(),
+        serverUpdatedAt: 0, // Mark as unsynced
+        isDeleted: false
+      };
+      await databaseService.saveAccount(syncableAccount);
+      
       setAccounts(prev => [...prev, localAccount]);
       await addToQueue({ type: 'addAccount', payload: { ...account, id: tempId }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after account add');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
     
@@ -546,7 +757,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshAccounts();
+        await refreshData();
       } else {
         console.error('❌ ONLINE: Failed to create account', { error: result.error });
         setError(result.error || 'Failed to create account');
@@ -565,8 +776,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         account: updatedAccount,
         queueLength: syncQueue.length
       });
+      
+      // Save to database for persistence
+      const syncableAccount = {
+        ...updatedAccount,
+        updatedAt: Date.now(),
+        serverUpdatedAt: 0, // Mark as unsynced
+        isDeleted: false
+      };
+      await databaseService.saveAccount(syncableAccount);
+      
       setAccounts(prev => prev.map(a => a.id === updatedAccount.id ? updatedAccount : a));
       await addToQueue({ type: 'updateAccount', payload: { id: updatedAccount.id, updates: updatedAccount }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after account update');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
     
@@ -574,6 +802,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       setLoading(true);
       setError(null);
+      
+      // Pure optimistic update for immediate reflection
+      setAccounts(prev => prev.map(acc => acc.id === updatedAccount.id ? updatedAccount : acc));
       
       const result = await apiService.updateAccount(updatedAccount.id, {
         name: updatedAccount.name,
@@ -592,11 +823,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         response: result 
       });
 
-      if (result.success) {
-        await refreshAccounts();
-      } else {
+      if (!result.success) {
         console.error('❌ ONLINE: Failed to update account', { error: result.error });
         setError(result.error || 'Failed to update account');
+        // Revert optimistic update on failure
+        await refreshData();
+      } else {
+        console.log('🎉 SUCCESS: Account update successful, keeping optimistic state - NO automatic refresh');
       }
     } catch (error) {
       console.error('❌ ONLINE: Exception updating account', { error, account: updatedAccount });
@@ -612,8 +845,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         accountId: id,
         queueLength: syncQueue.length
       });
+      
+      // Mark as deleted in database for persistence (soft delete)
+      await databaseService.deleteAccount(id);
+      
       setAccounts(prev => prev.filter(a => a.id !== id));
       await addToQueue({ type: 'deleteAccount', payload: { id }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after account delete');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
     
@@ -630,7 +874,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshAccounts();
+        await refreshData();
       } else {
         console.error('❌ ONLINE: Failed to delete account', { error: result.error });
         setError(result.error || 'Failed to delete account');
@@ -662,7 +906,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!result.success) {
         setError(result.error || 'Failed to reorder accounts');
         // Revert the optimistic update
-        await refreshAccounts();
+        await refreshData();
       }
     } catch (error) {
       console.error('Error reordering accounts:', error);
@@ -684,6 +928,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       setCategories(prev => [...prev, localCategory]);
       await addToQueue({ type: 'addCategory', payload: { ...category, id: tempId }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after category add');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
 
@@ -707,7 +958,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshCategories();
+        await refreshData();
       } else {
         console.error('❌ ONLINE: Failed to create category', { error: result.error });
         setError(result.error || 'Failed to create category');
@@ -728,6 +979,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       setCategories(prev => prev.map(c => c.id === updatedCategory.id ? updatedCategory : c));
       await addToQueue({ type: 'updateCategory', payload: { id: updatedCategory.id, updates: updatedCategory }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after category update');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
 
@@ -735,6 +993,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       setLoading(true);
       setError(null);
+      
+      // Pure optimistic update for immediate reflection
+      setCategories(prev => prev.map(cat => cat.id === updatedCategory.id ? updatedCategory : cat));
       
       const result = await apiService.updateCategory(updatedCategory.id, {
         name: updatedCategory.name,
@@ -750,11 +1011,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         response: result 
       });
 
-      if (result.success) {
-        await refreshCategories();
-      } else {
+      if (!result.success) {
         console.error('❌ ONLINE: Failed to update category', { error: result.error });
         setError(result.error || 'Failed to update category');
+        // Revert optimistic update on failure
+        await refreshData();
+      } else {
+        console.log('🎉 SUCCESS: Category update successful, keeping optimistic state - NO automatic refresh');
       }
     } catch (error) {
       console.error('❌ ONLINE: Exception updating category', { error, category: updatedCategory });
@@ -772,6 +1035,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       setCategories(prev => prev.filter(c => c.id !== id));
       await addToQueue({ type: 'deleteCategory', payload: { id }, timestamp: Date.now() });
+      
+      // Trigger balance recalculation for immediate reflection
+      setTimeout(() => {
+        console.log('🔄 OFFLINE: Recalculating balances after category delete');
+        recalculateAllBalances();
+      }, 0);
+      
       return;
     }
 
@@ -788,7 +1058,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshCategories();
+        await refreshData();
       } else {
         console.error('❌ ONLINE: Failed to delete category', { error: result.error });
         setError(result.error || 'Failed to delete category');
@@ -898,9 +1168,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshTransactions();
-        // Note: Account balances will be automatically updated via the useEffect hook
-        // when transactions are refreshed, ensuring consistency
+        await refreshData();
+        // Note: Account balances will be automatically updated via the balance recalculation
+        // when refreshData is called, ensuring consistency
       } else {
         console.error('❌ ONLINE: Failed to create transaction', { error: result.error });
         setError(result.error || 'Failed to create transaction');
@@ -938,6 +1208,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(true);
       setError(null);
       
+      // Pure optimistic update - just update the transaction, no balance recalculation
+      setTransactions(prev => prev.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx));
+      
       // Extract IDs from populated objects if necessary
       const fromAccountId = typeof updatedTransaction.fromAccount === 'object' 
         ? updatedTransaction.fromAccount.id 
@@ -966,11 +1239,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         response: result 
       });
 
-      if (result.success) {
-        await refreshTransactions();
-      } else {
+      console.log('🔍 DEBUG: Checking optimistic update preservation', {
+        currentTransactionState: transactions.find(tx => tx.id === updatedTransaction.id),
+        optimisticUpdate: updatedTransaction,
+        apiResponse: result
+      });
+
+      if (!result.success) {
         console.error('❌ ONLINE: Failed to update transaction', { error: result.error });
         setError(result.error || 'Failed to update transaction');
+        // Revert optimistic update on failure
+        await refreshData();
+      } else {
+        console.log('🎉 SUCCESS: API update successful, keeping optimistic state - NO automatic balance refresh');
       }
     } catch (error) {
       console.error('❌ ONLINE: Exception updating transaction', { error, transaction: updatedTransaction });
@@ -1013,7 +1294,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (result.success) {
-        await refreshTransactions();
+        await refreshData();
       } else {
         console.error('❌ ONLINE: Failed to delete transaction', { error: result.error });
         setError(result.error || 'Failed to delete transaction');
@@ -1032,19 +1313,63 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      category?: string;
      fromDate?: string;
      toDate?: string;
-   }) => {
-     try {
-       const result = await apiService.getAllTransactions(params);
-       if (result.success && result.data) {
-         // Filter out deleted transactions
-         const activeTransactions = result.data.filter(transaction => !transaction.isDeleted);
-         return activeTransactions;
+   }): Promise<Transaction[]> => {
+     // Use local transactions and filter them instead of making API calls
+     let filteredTransactions = transactions.filter(transaction => !transaction.isDeleted);
+     
+     if (params) {
+       if (params.fromAccount) {
+         filteredTransactions = filteredTransactions.filter(transaction => {
+           const fromAccountId = typeof transaction.fromAccount === 'object' 
+             ? transaction.fromAccount.id 
+             : transaction.fromAccount;
+           return fromAccountId === params.fromAccount;
+         });
        }
-       return [];
-     } catch (error) {
-       console.error('Failed to get transactions:', error);
-       return [];
+       
+       if (params.toAccount) {
+         filteredTransactions = filteredTransactions.filter(transaction => {
+           const toAccountId = typeof transaction.toAccount === 'object' 
+             ? transaction.toAccount?.id 
+             : transaction.toAccount;
+           return toAccountId === params.toAccount;
+         });
+       }
+       
+       if (params.category) {
+         filteredTransactions = filteredTransactions.filter(transaction => {
+           const categoryId = typeof transaction.category === 'object' 
+             ? transaction.category?.id 
+             : transaction.category;
+           return categoryId === params.category;
+         });
+       }
+       
+       if (params.fromDate) {
+         filteredTransactions = filteredTransactions.filter(transaction => 
+           new Date(transaction.transactionDate) >= new Date(params.fromDate!)
+         );
+       }
+       
+       if (params.toDate) {
+         filteredTransactions = filteredTransactions.filter(transaction => 
+           new Date(transaction.transactionDate) <= new Date(params.toDate!)
+         );
+       }
      }
+     
+     // Sort by date (newest first)
+     filteredTransactions.sort((a, b) => 
+       new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()
+     );
+     
+     console.log('📊 GET TRANSACTIONS: Returning filtered local data', {
+       total: transactions.length,
+       filtered: filteredTransactions.length,
+       params
+     });
+     
+     return filteredTransactions;
    };
 
   // Manual function to recalculate account balances
@@ -1070,6 +1395,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCategories(updatedCategories);
   };
 
+  // Manual function to reset database (for debugging)
+  const resetDatabase = async () => {
+    console.log('🔄 MANUAL: Resetting database');
+    try {
+      await databaseService.resetDatabase();
+      console.log('✅ MANUAL: Database reset successful');
+      
+      // Clear current state
+      setAccounts([]);
+      setCategories([]);
+      setTransactions([]);
+      
+      // Reload from API
+      await refreshData();
+    } catch (error) {
+      console.error('❌ MANUAL: Failed to reset database', error);
+      setError('Failed to reset database');
+    }
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -1078,6 +1423,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         transactions,
         loading,
         error,
+        isInitialized,
+        isLoadingData,
         setAccounts,
         setCategories,
         setTransactions,
@@ -1100,6 +1447,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         recalculateAccountBalances,
         recalculateCategoryBalances,
         recalculateAllBalances,
+        resetDatabase,
       }}
     >
       {children}

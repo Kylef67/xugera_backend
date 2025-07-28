@@ -20,6 +20,8 @@ export default function Dashboard() {
     reorderAccounts,
     loading,
     error,
+    isInitialized,
+    isLoadingData,
     refreshData
   } = useData();
   
@@ -138,12 +140,12 @@ export default function Dashboard() {
           <TouchableOpacity 
             style={styles.actionButton} 
             onPress={handleRefresh}
-            disabled={loading}
+            disabled={isLoadingData}
           >
             <MaterialCommunityIcons 
-              name={loading ? "loading" : "refresh"} 
+              name={isLoadingData ? "loading" : "refresh"} 
               size={24} 
-              color={loading ? "#8E8E93" : "#8E8E93"} 
+              color={isLoadingData ? "#8E8E93" : "#8E8E93"} 
             />
           </TouchableOpacity>
         </View>
@@ -223,7 +225,7 @@ export default function Dashboard() {
       </View>
 
       <View style={styles.accountsContainer}>
-        {isRefreshing ? (
+        {!isInitialized || isRefreshing ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#6B8AFE" />
           </View>

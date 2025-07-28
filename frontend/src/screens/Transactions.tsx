@@ -59,7 +59,17 @@ const groupTransactionsByDate = (transactions: Transaction[]) => {
 };
 
 export default function Transactions() {
-  const { accounts, categories, transactions, getTransactions, addTransaction, updateTransaction, loading, error } = useData();
+  const { 
+    accounts, 
+    categories, 
+    transactions, 
+    getTransactions, 
+    addTransaction, 
+    updateTransaction, 
+    loading, 
+    error,
+    isInitialized 
+  } = useData();
   const [dateSelection, setDateSelection] = useState<DateRangeSelection>(() => {
     const now = new Date();
     const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
@@ -82,6 +92,13 @@ export default function Transactions() {
   useEffect(() => {
     loadTransactions();
   }, [dateSelection]);
+
+  // CRITICAL: Update filtered transactions when DataContext transactions change
+  useEffect(() => {
+    if (isInitialized) {
+      loadTransactions();
+    }
+  }, [transactions, isInitialized]);
 
   const loadTransactions = async () => {
     try {
@@ -234,6 +251,11 @@ export default function Transactions() {
         toDate,
       });
       
+      console.log('🔍 TRANSACTIONS: Retrieved filtered transactions', {
+        dateFilter: { fromDate, toDate },
+        count: result.length
+      });
+      
       setFilteredTransactions(result);
     } catch (error) {
       console.error('Failed to load transactions:', error);
@@ -285,12 +307,14 @@ export default function Transactions() {
       }
     } catch (error) {
       console.error('Failed to save transaction:', error);
+      // On error, refresh to show server state
+      await loadTransactions();
     } finally {
-      // Only close form and refresh if it's not a duplicate operation
+      // Only close form if it's not a duplicate operation - NO REFRESH ON SUCCESS
       if (!transaction.isDuplicate) {
         setShowTransactionForm(false);
         setEditTransaction(undefined);
-        await loadTransactions(); // Refresh transactions
+        // Removed loadTransactions() call - optimistic updates handle the UI
       }
     }
   };

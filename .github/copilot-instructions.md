@@ -80,3 +80,11 @@ npm run test                            # Run Playwright tests (requires fronten
 - MongoDB connection string must be set in environment for local development
 - Soft delete patterns require filtering `isDeleted: false` in queries
 - Zod validation errors return structured messages for form field mapping
+- **CRITICAL - API Call Optimization**: Avoid cascading useEffect hooks that trigger multiple API calls:
+  - DataContext should load data ONCE on initialization, not on every screen mount
+  - Remove dependencies like `[syncQueue]` from NetInfo listeners to prevent recreation
+  - Use `useRef` to track state without triggering re-renders
+  - Balance calculations should happen AFTER data refresh, not on every state change
+  - `getTransactions()` should filter local data, not make new API calls
+  - Prevent duplicate refresh calls with loading state checks (`isLoadingData`)
+  - Navigation between tabs should use cached context data, never trigger fresh API calls
