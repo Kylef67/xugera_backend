@@ -1,4 +1,3 @@
-import * as SQLite from 'expo-sqlite';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Account } from '../contexts/DataContext';
@@ -159,14 +158,21 @@ class AsyncStorageDatabaseService implements DatabaseInterface {
 }
 
 class SQLiteDatabaseService implements DatabaseInterface {
-  private db: SQLite.SQLiteDatabase | null = null;
+  private db: any = null;
   private isInitialized: boolean = false;
+  private SQLite: any = null;
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
     
     console.log('Initializing SQLite database...');
-    this.db = await SQLite.openDatabaseAsync('xugera_offline.db');
+    
+    // Dynamically import SQLite only when needed
+    if (!this.SQLite) {
+      this.SQLite = await import('expo-sqlite' as any);
+    }
+    
+    this.db = await this.SQLite.openDatabaseAsync('xugera_offline.db');
     
     // Create tables with proper schema
     await this.db.execAsync(`
@@ -419,7 +425,11 @@ class SQLiteDatabaseService implements DatabaseInterface {
     
     // Delete the database file by opening with deleteAsync
     try {
-      await SQLite.deleteDatabaseAsync('xugera_offline.db');
+      // Ensure SQLite is loaded
+      if (!this.SQLite) {
+        this.SQLite = await import('expo-sqlite' as any);
+      }
+      await this.SQLite.deleteDatabaseAsync('xugera_offline.db');
       console.log('Database file deleted successfully');
     } catch (error) {
       console.log('Database file deletion skipped (file may not exist)');
