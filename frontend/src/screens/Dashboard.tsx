@@ -6,7 +6,6 @@ import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import AddAccountDrawer from '../components/AddAccountDrawer';
 import AccountForm from './AccountForm';
 import { useData, Account } from '../contexts/DataContext';
-import { generateObjectId } from '../utils/objectId';
 import DraggableAccountList from '../components/DraggableAccountList';
 import { formatCurrency } from '../utils/formatters';
 
@@ -66,12 +65,8 @@ export default function Dashboard() {
       // Update existing account
       updateAccount({ ...accountData });
     } else {
-      // Add new account
-      const newAccount: Account = {
-        ...accountData,
-        id: generateObjectId(),
-      };
-      addAccount(newAccount);
+      // Add new account - server will generate ID
+      addAccount(accountData);
     }
     
     setShowAccountForm(false);

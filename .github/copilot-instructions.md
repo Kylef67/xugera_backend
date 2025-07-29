@@ -3,13 +3,13 @@
 ## Architecture Overview
 This is a full-stack personal finance management application with:
 - **Backend**: Node.js/Express serverless API deployed to AWS Lambda via Serverless Framework
-- **Frontend**: React Native/Expo mobile app with offline-first SQLite + server sync
-- **Database**: MongoDB for server-side persistence, SQLite for local storage
+- **Frontend**: React Native/Expo mobile app with online-first architecture
+- **Database**: MongoDB for server-side persistence
 - **Testing**: Jest for backend unit tests, Playwright for E2E frontend testing
 
 ## Project Structure
 - `backend/` - Express API with Mongoose models, Zod validation, i18n support
-- `frontend/` - Expo React Native app with async storage and offline capabilities  
+- `frontend/` - Expo React Native app with optimistic updates and direct API communication
 - `tests/` - Playwright E2E tests targeting `localhost:19006` (Expo dev server)
 
 ## Development Workflow
@@ -45,14 +45,15 @@ npm run test                            # Run Playwright tests (requires fronten
 - **Routes**: RESTful endpoints under `/api` prefix (accounts, transactions, categories)
 
 ### Frontend Data Management  
-- **Context**: `DataContext.tsx` provides app-wide state with offline-first approach
-- **API Service**: `apiService.ts` handles server communication with fallback to local storage
+- **Context**: `DataContext.tsx` provides app-wide state with online-first approach
+- **API Service**: `apiService.ts` handles all server communication with error handling
 - **Navigation**: Bottom tab navigator with Material Community Icons
 - **Forms**: Formik + Yup validation with bottom sheet modals
+- **Updates**: Optimistic updates for immediate UI feedback, with automatic revert on API failure
 
 ### Database Design
 - **Soft Deletes**: Use `isDeleted: boolean` flags instead of hard deletes
-- **Timestamps**: Mongoose handles `createdAt`/`updatedAt` + custom `updatedAt` numbers
+- **Timestamps**: Mongoose handles `createdAt`/`updatedAt` automatically
 - **Relationships**: Parent-child categories, account-transaction references
 - **Ordering**: Custom `order` fields for user-defined sorting (accounts, etc.)
 - **Date Handling**: Always use UTC dates - frontend creates with `Date.UTC()`, backend parses ISO strings directly, display uses UTC methods to avoid timezone shifts
@@ -72,7 +73,7 @@ npm run test                            # Run Playwright tests (requires fronten
 - **Account Management**: Drag-and-drop reordering, balance calculations, type-based features
 - **Transaction Flow**: Category selection, account transfers, date/amount validation  
 - **Category Hierarchy**: Parent-child relationships with aggregate calculations
-- **Offline Sync**: Local SQLite operations with background API synchronization
+- **Online-First**: Direct API calls with optimistic updates and error handling
 
 ## Common Gotchas
 - Frontend port must be 19006 for E2E tests to pass
@@ -80,11 +81,10 @@ npm run test                            # Run Playwright tests (requires fronten
 - MongoDB connection string must be set in environment for local development
 - Soft delete patterns require filtering `isDeleted: false` in queries
 - Zod validation errors return structured messages for form field mapping
-- **CRITICAL - API Call Optimization**: Avoid cascading useEffect hooks that trigger multiple API calls:
-  - DataContext should load data ONCE on initialization, not on every screen mount
-  - Remove dependencies like `[syncQueue]` from NetInfo listeners to prevent recreation
-  - Use `useRef` to track state without triggering re-renders
-  - Balance calculations should happen AFTER data refresh, not on every state change
-  - `getTransactions()` should filter local data, not make new API calls
-  - Prevent duplicate refresh calls with loading state checks (`isLoadingData`)
-  - Navigation between tabs should use cached context data, never trigger fresh API calls
+- **CRITICAL - API Call Optimization**: 
+  - DataContext loads data ONCE on initialization, not on every screen mount
+  - Balance calculations happen AFTER data refresh, not on every state change
+  - `getTransactions()` filters local data, doesn't make new API calls
+  - Navigation between tabs uses cached context data, never triggers fresh API calls
+  - Optimistic updates provide immediate feedback while API calls happen in background
+  - Failed API calls automatically revert optimistic updates and refresh from server

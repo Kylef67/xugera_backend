@@ -15,6 +15,7 @@ export interface Category {
   color?: string;
   type?: 'Income' | 'Expense';
   parent?: string | null;
+  order?: number;
   balance?: number; // Total balance including subcategories
   directBalance?: number; // Balance from direct transactions only
   transactionCount?: number; // Total transaction count including subcategories
