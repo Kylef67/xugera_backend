@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+1. dont run the server (frontend or backend). Assume its already running

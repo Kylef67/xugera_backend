@@ -1,4 +1,5 @@
 import { Account } from '../contexts/DataContext';
+import Constants from 'expo-constants';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -42,7 +43,7 @@ export interface Transaction {
 }
 
 class ApiService {
-  private baseUrl = 'https://yezfovq877.execute-api.ap-southeast-1.amazonaws.com/test/api';
+  private baseUrl = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000/dev';
 
   private async request<T>(
     endpoint: string,
