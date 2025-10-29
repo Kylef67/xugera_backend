@@ -361,7 +361,7 @@ export function DataProvider({ children }: DataProviderProps) {
       
       if (response.success && response.data?.data) {
         // Replace temp account with real one
-        const updatedAccounts = accounts.map(acc => 
+        const updatedAccounts = newAccounts.map(acc => 
           acc.id === tempAccount.id ? response.data!.data : acc
         );
         setAccounts(updatedAccounts);
@@ -511,7 +511,7 @@ export function DataProvider({ children }: DataProviderProps) {
 
       const response = await apiService.createCategory(categoryData);
       if (response.success && response.data?.data) {
-        const updated = categories.map(cat => cat.id === tempCategory.id ? response.data!.data : cat);
+        const updated = newCategories.map(cat => cat.id === tempCategory.id ? response.data!.data : cat);
         setCategories(updated);
         await storageService.saveCategories(updated);
       } else {
@@ -630,7 +630,7 @@ export function DataProvider({ children }: DataProviderProps) {
 
       const response = await apiService.createTransaction(transactionData);
       if (response.success && response.data?.data) {
-        const updated = transactions.map(trans => trans.id === tempTransaction.id ? response.data!.data : trans);
+        const updated = newTransactions.map(trans => trans.id === tempTransaction.id ? response.data!.data : trans);
         setTransactions(updated);
         await storageService.saveTransactions(updated);
       } else {
