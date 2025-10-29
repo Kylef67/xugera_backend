@@ -16,6 +16,8 @@ interface ICategory extends Document {
     transactionCount: number; // Number of transactions in this category
     directTransactionCount: number; // Number of direct transactions (excluding subcategories)
     updatedAt?: number;
+    syncVersion?: number;
+    lastModifiedBy?: string;
 }
 
 const categorySchema: Schema = new mongoose.Schema({
@@ -30,7 +32,9 @@ const categorySchema: Schema = new mongoose.Schema({
     directBalance: { type: Number, default: 0 }, // Direct transactions only
     transactionCount: { type: Number, default: 0 }, // Total transaction count including subcategories
     directTransactionCount: { type: Number, default: 0 }, // Direct transaction count only
-    updatedAt: { type: Number, default: Date.now }
+    updatedAt: { type: Number, default: Date.now },
+    syncVersion: { type: Number, default: 1 },
+    lastModifiedBy: { type: String, default: 'system' }
 }, { timestamps: true });
 
 // Virtual for getting subcategories

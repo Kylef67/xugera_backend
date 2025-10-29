@@ -18,12 +18,17 @@ export function addSoftDeleteFilter(filter: any = {}): any {
 
 /**
  * Create soft delete update object
+ * @param deviceId - Optional device ID for tracking
+ * @param currentSyncVersion - Current sync version
  * @returns Update object for soft deleting a document
  */
-export function createSoftDeleteUpdate(): { isDeleted: boolean; deletedAt: Date } {
+export function createSoftDeleteUpdate(deviceId?: string, currentSyncVersion?: number): any {
   return {
     isDeleted: true,
-    deletedAt: new Date()
+    deletedAt: new Date(),
+    updatedAt: Date.now(),
+    syncVersion: (currentSyncVersion || 1) + 1,
+    lastModifiedBy: deviceId || 'system'
   };
 }
 
@@ -42,12 +47,16 @@ export function createSoftRestoreUpdate(): { isDeleted: boolean; deletedAt?: und
  * Helper function to perform soft delete on any model
  * @param Model - Mongoose model
  * @param id - Document ID to soft delete
+ * @param deviceId - Optional device ID for tracking
  * @returns Promise resolving to the updated document or null if not found
  */
-export async function performSoftDelete(Model: any, id: string) {
+export async function performSoftDelete(Model: any, id: string, deviceId?: string) {
+  const existing = await Model.findOne({ _id: id, ...NOT_DELETED_FILTER });
+  if (!existing) return null;
+  
   return await Model.findOneAndUpdate(
     { _id: id, ...NOT_DELETED_FILTER },
-    createSoftDeleteUpdate(),
+    createSoftDeleteUpdate(deviceId, existing.syncVersion),
     { new: true }
   );
 }

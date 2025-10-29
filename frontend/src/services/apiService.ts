@@ -241,6 +241,84 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  // Sync API methods
+  async syncChanges(lastSyncTimestamp: number, deviceId: string): Promise<ApiResponse<{
+    accounts: any[];
+    categories: any[];
+    transactions: any[];
+    currentTimestamp: number;
+    syncedAt: string;
+  }>> {
+    return this.request<{
+      accounts: any[];
+      categories: any[];
+      transactions: any[];
+      currentTimestamp: number;
+      syncedAt: string;
+    }>(`/sync/changes?lastSyncTimestamp=${lastSyncTimestamp}&deviceId=${deviceId}`);
+  }
+
+  async pushOfflineOperations(operations: any[], deviceId: string): Promise<ApiResponse<{
+    success: boolean;
+    accepted: Array<{ operationId: string; id: string }>;
+    conflicts: Array<{
+      operationId: string;
+      reason: string;
+      serverRecord: any;
+      serverUpdatedAt?: number;
+      localTimestamp?: number;
+    }>;
+    rejected: Array<{ operationId: string; error: string }>;
+    serverData: {
+      accounts: any[];
+      categories: any[];
+      transactions: any[];
+    };
+    currentTimestamp: number;
+  }>> {
+    return this.request<{
+      success: boolean;
+      accepted: Array<{ operationId: string; id: string }>;
+      conflicts: Array<{
+        operationId: string;
+        reason: string;
+        serverRecord: any;
+        serverUpdatedAt?: number;
+        localTimestamp?: number;
+      }>;
+      rejected: Array<{ operationId: string; error: string }>;
+      serverData: {
+        accounts: any[];
+        categories: any[];
+        transactions: any[];
+      };
+      currentTimestamp: number;
+    }>('/sync/push', {
+      method: 'POST',
+      body: { operations, deviceId },
+    });
+  }
+
+  async getSyncStatus(): Promise<ApiResponse<{
+    status: string;
+    serverTime: number;
+    counts: {
+      accounts: number;
+      categories: number;
+      transactions: number;
+    };
+  }>> {
+    return this.request<{
+      status: string;
+      serverTime: number;
+      counts: {
+        accounts: number;
+        categories: number;
+        transactions: number;
+      };
+    }>('/sync/status');
+  }
 }
 
 export const apiService = new ApiService(); 

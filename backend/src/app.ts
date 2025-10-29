@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import accountRoutes from './routes/account';
 import transactionRoutes from './routes/transaction';
 import categoryRoutes from './routes/category';
+import syncRoutes from './routes/sync';
 import { languageMiddleware } from './middleware/language';
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(languageMiddleware);
 app.use('/api', accountRoutes);
 app.use('/api', transactionRoutes);
 app.use('/api', categoryRoutes);
+app.use('/api/sync', syncRoutes);
 
 // MongoDB connection
 const mongoUri = process.env.MONGO_URI as string;  // Type assertion for environment variable

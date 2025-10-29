@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiService, ApiResponse } from '../services/apiService';
+import storageService from '../services/storageService';
+import networkManager from '../services/networkManager';
+import syncService from '../services/syncService';
 import type { Category as ApiCategory, Transaction as ApiTransaction } from '../services/apiService';
+import type { OfflineOperation, OperationType, ResourceType } from '../types/offline';
 
 // Frontend types that match the server models
 export interface Account {
@@ -56,6 +60,12 @@ interface DataContextType {
   error: string | null;
   isInitialized: boolean;
   isLoadingData: boolean;
+  
+  // Offline/Sync state
+  isOnline: boolean;
+  isSyncing: boolean;
+  offlineQueueCount: number;
+  lastSyncTime: number;
 
   // Account methods
   addAccount: (account: Omit<Account, 'id'>) => Promise<void>;
@@ -79,6 +89,7 @@ interface DataContextType {
 
   // Utility methods
   refreshData: () => Promise<void>;
+  triggerSync: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -95,18 +106,90 @@ export function DataProvider({ children }: DataProviderProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Offline/Sync state
+  const [isOnline, setIsOnline] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [offlineQueue, setOfflineQueue] = useState<OfflineOperation[]>([]);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number>(0);
+  const [deviceId, setDeviceId] = useState<string>('');
 
   // Computed properties
   const isLoadingData = loading;
+  const offlineQueueCount = offlineQueue.length;
 
   // Load all data on mount
   useEffect(() => {
-    loadAllData();
+    initializeApp();
   }, []);
 
-  const loadAllData = async () => {
+  // Network state listener
+  useEffect(() => {
+    const unsubscribe = networkManager.addListener((connected) => {
+      console.log(`📡 Network state changed in DataContext: ${connected ? 'Online' : 'Offline'}`);
+      setIsOnline(connected);
+      
+      // When coming online, trigger sync
+      if (connected && offlineQueue.length > 0) {
+        console.log('🔄 Coming online with pending operations, triggering sync');
+        triggerSync();
+      }
+    });
+
+    // Set initial state
+    setIsOnline(networkManager.getIsConnected());
+
+    return unsubscribe;
+  }, [offlineQueue.length]);
+
+  // Periodic sync when online (every 30 seconds)
+  useEffect(() => {
+    if (!isOnline || !isInitialized) return;
+
+    const interval = setInterval(() => {
+      console.log('⏰ Periodic sync check');
+      triggerSync();
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [isOnline, isInitialized]);
+
+  const initializeApp = async () => {
     setLoading(true);
-    setError(null);
+    try {
+      // Load device ID
+      const id = await storageService.getDeviceId();
+      setDeviceId(id);
+
+      // Load data from local storage first (for immediate UI)
+      const localData = await storageService.loadAllData();
+      setAccounts(localData.accounts);
+      setCategories(localData.categories);
+      setTransactions(localData.transactions);
+
+      // Load offline queue and sync timestamp
+      const queue = await storageService.getOfflineQueue();
+      setOfflineQueue(queue);
+      
+      const timestamp = await storageService.getLastSyncTimestamp();
+      setLastSyncTimestamp(timestamp);
+
+      console.log(`📦 Loaded from storage: ${localData.accounts.length} accounts, ${localData.categories.length} categories, ${localData.transactions.length} transactions, ${queue.length} queued operations`);
+
+      // If online, fetch from API
+      if (networkManager.getIsConnected()) {
+        await loadAllData();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to initialize app');
+      console.error('Error initializing app:', err);
+    } finally {
+      setLoading(false);
+      setIsInitialized(true);
+    }
+  };
+
+  const loadAllData = async () => {
     try {
       const [accountsResponse, categoriesResponse, transactionsResponse] = await Promise.all([
         apiService.getAllAccounts(),
@@ -116,13 +199,21 @@ export function DataProvider({ children }: DataProviderProps) {
       
       if (accountsResponse.success && accountsResponse.data) {
         setAccounts(accountsResponse.data);
+        await storageService.saveAccounts(accountsResponse.data);
       }
       if (categoriesResponse.success && categoriesResponse.data) {
         setCategories(categoriesResponse.data);
+        await storageService.saveCategories(categoriesResponse.data);
       }
       if (transactionsResponse.success && transactionsResponse.data) {
         setTransactions(transactionsResponse.data);
+        await storageService.saveTransactions(transactionsResponse.data);
       }
+
+      // Update sync timestamp
+      const newTimestamp = Date.now();
+      setLastSyncTimestamp(newTimestamp);
+      await storageService.saveLastSyncTimestamp(newTimestamp);
 
       // Check for any errors
       if (!accountsResponse.success) {
@@ -135,10 +226,114 @@ export function DataProvider({ children }: DataProviderProps) {
         throw new Error(transactionsResponse.error || 'Failed to load transactions');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      console.error('Error loading data:', err);
+      // Don't throw - we have local data
+    }
+  };
+
+  // Helper: Add operation to offline queue
+  const queueOperation = async (
+    type: OperationType,
+    resource: ResourceType,
+    data: any
+  ): Promise<void> => {
+    const operation: OfflineOperation = {
+      id: `op-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+      operationId: `op-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+      type,
+      resource,
+      data,
+      localTimestamp: Date.now(),
+      retryCount: 0,
+      deviceId
+    };
+
+    const newQueue = [...offlineQueue, operation];
+    setOfflineQueue(newQueue);
+    await storageService.saveOfflineQueue(newQueue);
+    
+    console.log(`📝 Queued ${type} operation for ${resource}:`, data.id || data.name);
+  };
+
+  // Trigger manual or automatic sync
+  const triggerSync = async (): Promise<void> => {
+    if (!isOnline || isSyncing || offlineQueue.length === 0) {
+      // Still fetch changes even if no queue
+      if (isOnline && !isSyncing && offlineQueue.length === 0) {
+        console.log('🔄 No queue, but checking for server changes');
+        const id = await storageService.getDeviceId();
+        const changes = await syncService.performIncrementalSync(lastSyncTimestamp, id);
+        
+        if (changes) {
+          const merged = syncService.mergeServerChanges(
+            accounts,
+            categories,
+            transactions,
+            changes
+          );
+          
+          setAccounts(merged.accounts);
+          setCategories(merged.categories);
+          setTransactions(merged.transactions);
+          
+          await storageService.saveAllData(
+            merged.accounts,
+            merged.categories,
+            merged.transactions
+          );
+          
+          setLastSyncTimestamp(changes.currentTimestamp);
+          await storageService.saveLastSyncTimestamp(changes.currentTimestamp);
+        }
+      }
+      return;
+    }
+
+    setIsSyncing(true);
+    setError(null);
+
+    try {
+      console.log('🔄 Starting full sync...');
+      
+      const result = await syncService.fullSync(
+        accounts,
+        categories,
+        transactions,
+        offlineQueue,
+        lastSyncTimestamp
+      );
+
+      if (result) {
+        // Update state with synced data
+        setAccounts(result.accounts);
+        setCategories(result.categories);
+        setTransactions(result.transactions);
+        setOfflineQueue(result.newQueue);
+        setLastSyncTimestamp(result.newTimestamp);
+
+        // Save to storage
+        await storageService.saveAllData(
+          result.accounts,
+          result.categories,
+          result.transactions
+        );
+        await storageService.saveOfflineQueue(result.newQueue);
+        await storageService.saveLastSyncTimestamp(result.newTimestamp);
+
+        if (result.conflicts > 0) {
+          console.log(`⚠️  Sync completed with ${result.conflicts} conflicts (server wins)`);
+        } else {
+          console.log('✅ Sync completed successfully');
+        }
+      } else {
+        setError('Sync failed. Will retry when connection is stable.');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Sync failed';
+      setError(errorMessage);
+      console.error('❌ Sync error:', err);
     } finally {
-      setLoading(false);
-      setIsInitialized(true);
+      setIsSyncing(false);
     }
   };
 
@@ -150,22 +345,42 @@ export function DataProvider({ children }: DataProviderProps) {
         ...accountData,
         id: `temp-${Date.now()}`, // Temporary ID for optimistic update
       };
-      setAccounts(prev => [...prev, tempAccount]);
+      const newAccounts = [...accounts, tempAccount];
+      setAccounts(newAccounts);
+      await storageService.saveAccounts(newAccounts);
+
+      if (!isOnline) {
+        // Queue for later
+        await queueOperation('CREATE', 'account', tempAccount);
+        console.log('📴 Offline: Account creation queued');
+        return;
+      }
 
       // API call
       const response = await apiService.createAccount(accountData);
       
       if (response.success && response.data?.data) {
         // Replace temp account with real one
-        setAccounts(prev => prev.map(acc => 
+        const updatedAccounts = accounts.map(acc => 
           acc.id === tempAccount.id ? response.data!.data : acc
-        ));
+        );
+        setAccounts(updatedAccounts);
+        await storageService.saveAccounts(updatedAccounts);
       } else {
         throw new Error(response.error || 'Failed to create account');
       }
     } catch (err) {
-      // Revert optimistic update
-      setAccounts(prev => prev.filter(acc => !acc.id.startsWith('temp-')));
+      // If online and failed, revert optimistic update
+      if (isOnline) {
+        setAccounts(accounts);
+        await storageService.saveAccounts(accounts);
+      } else {
+        // If offline, keep the change and queue it
+        await queueOperation('CREATE', 'account', {
+          ...accountData,
+          id: `temp-${Date.now()}`
+        });
+      }
       setError(err instanceof Error ? err.message : 'Failed to add account');
       throw err;
     }
@@ -175,9 +390,17 @@ export function DataProvider({ children }: DataProviderProps) {
     try {
       // Optimistic update
       const originalAccounts = [...accounts];
-      setAccounts(prev => prev.map(acc => 
+      const updatedAccounts = accounts.map(acc => 
         acc.id === account.id ? account : acc
-      ));
+      );
+      setAccounts(updatedAccounts);
+      await storageService.saveAccounts(updatedAccounts);
+
+      if (!isOnline) {
+        await queueOperation('UPDATE', 'account', account);
+        console.log('📴 Offline: Account update queued');
+        return;
+      }
 
       // API call
       const response = await apiService.updateAccount(account.id, account);
@@ -185,11 +408,15 @@ export function DataProvider({ children }: DataProviderProps) {
       if (!response.success) {
         // Revert optimistic update
         setAccounts(originalAccounts);
+        await storageService.saveAccounts(originalAccounts);
         throw new Error(response.error || 'Failed to update account');
       }
     } catch (err) {
-      // Revert optimistic update - reload data
-      await loadAllData();
+      if (isOnline) {
+        await loadAllData();
+      } else {
+        await queueOperation('UPDATE', 'account', account);
+      }
       setError(err instanceof Error ? err.message : 'Failed to update account');
       throw err;
     }
@@ -199,7 +426,15 @@ export function DataProvider({ children }: DataProviderProps) {
     try {
       // Optimistic update
       const originalAccounts = [...accounts];
-      setAccounts(prev => prev.filter(acc => acc.id !== id));
+      const updatedAccounts = accounts.filter(acc => acc.id !== id);
+      setAccounts(updatedAccounts);
+      await storageService.saveAccounts(updatedAccounts);
+
+      if (!isOnline) {
+        await queueOperation('DELETE', 'account', { id });
+        console.log('📴 Offline: Account deletion queued');
+        return;
+      }
 
       // API call
       const response = await apiService.deleteAccount(id);
@@ -207,11 +442,16 @@ export function DataProvider({ children }: DataProviderProps) {
       if (!response.success) {
         // Revert optimistic update
         setAccounts(originalAccounts);
+        await storageService.saveAccounts(originalAccounts);
         throw new Error(response.error || 'Failed to delete account');
       }
     } catch (err) {
-      // Revert optimistic update
-      setAccounts(accounts);
+      if (isOnline) {
+        setAccounts(accounts);
+        await storageService.saveAccounts(accounts);
+      } else {
+        await queueOperation('DELETE', 'account', { id });
+      }
       setError(err instanceof Error ? err.message : 'Failed to delete account');
       throw err;
     }
@@ -222,6 +462,16 @@ export function DataProvider({ children }: DataProviderProps) {
       // Optimistic update
       const originalAccounts = [...accounts];
       setAccounts(reorderedAccounts);
+      await storageService.saveAccounts(reorderedAccounts);
+
+      if (!isOnline) {
+        // Queue multiple updates
+        for (const account of reorderedAccounts) {
+          await queueOperation('UPDATE', 'account', account);
+        }
+        console.log('📴 Offline: Account reordering queued');
+        return;
+      }
 
       // API call - use the order update endpoint
       const orderData = reorderedAccounts.map((account, index) => ({
@@ -234,11 +484,13 @@ export function DataProvider({ children }: DataProviderProps) {
       if (!response.success) {
         // Revert optimistic update
         setAccounts(originalAccounts);
+        await storageService.saveAccounts(originalAccounts);
         throw new Error(response.error || 'Failed to reorder accounts');
       }
     } catch (err) {
-      // Revert optimistic update
-      await loadAllData();
+      if (isOnline) {
+        await loadAllData();
+      }
       setError(err instanceof Error ? err.message : 'Failed to reorder accounts');
       throw err;
     }
@@ -247,27 +499,31 @@ export function DataProvider({ children }: DataProviderProps) {
   // Category methods
   const addCategory = async (categoryData: Omit<Category, 'id'>) => {
     try {
-      // Optimistic update
-      const tempCategory: Category = {
-        ...categoryData,
-        id: `temp-${Date.now()}`,
-      };
-      setCategories(prev => [...prev, tempCategory]);
+      const tempCategory: Category = { ...categoryData, id: `temp-${Date.now()}` };
+      const newCategories = [...categories, tempCategory];
+      setCategories(newCategories);
+      await storageService.saveCategories(newCategories);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('CREATE', 'category', tempCategory);
+        return;
+      }
+
       const response = await apiService.createCategory(categoryData);
-      
       if (response.success && response.data?.data) {
-        // Replace temp category with real one
-        setCategories(prev => prev.map(cat => 
-          cat.id === tempCategory.id ? response.data!.data : cat
-        ));
+        const updated = categories.map(cat => cat.id === tempCategory.id ? response.data!.data : cat);
+        setCategories(updated);
+        await storageService.saveCategories(updated);
       } else {
         throw new Error(response.error || 'Failed to create category');
       }
     } catch (err) {
-      // Revert optimistic update
-      setCategories(prev => prev.filter(cat => !cat.id.startsWith('temp-')));
+      if (isOnline) {
+        setCategories(categories);
+        await storageService.saveCategories(categories);
+      } else {
+        await queueOperation('CREATE', 'category', { ...categoryData, id: `temp-${Date.now()}` });
+      }
       setError(err instanceof Error ? err.message : 'Failed to add category');
       throw err;
     }
@@ -275,23 +531,25 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const updateCategory = async (category: Category) => {
     try {
-      // Optimistic update
       const originalCategories = [...categories];
-      setCategories(prev => prev.map(cat => 
-        cat.id === category.id ? category : cat
-      ));
+      const updated = categories.map(cat => cat.id === category.id ? category : cat);
+      setCategories(updated);
+      await storageService.saveCategories(updated);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('UPDATE', 'category', category);
+        return;
+      }
+
       const response = await apiService.updateCategory(category.id, category);
-      
       if (!response.success) {
-        // Revert optimistic update
         setCategories(originalCategories);
+        await storageService.saveCategories(originalCategories);
         throw new Error(response.error || 'Failed to update category');
       }
     } catch (err) {
-      // Revert optimistic update
-      await loadAllData();
+      if (isOnline) await loadAllData();
+      else await queueOperation('UPDATE', 'category', category);
       setError(err instanceof Error ? err.message : 'Failed to update category');
       throw err;
     }
@@ -299,21 +557,29 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const deleteCategory = async (id: string) => {
     try {
-      // Optimistic update
       const originalCategories = [...categories];
-      setCategories(prev => prev.filter(cat => cat.id !== id));
+      const updated = categories.filter(cat => cat.id !== id);
+      setCategories(updated);
+      await storageService.saveCategories(updated);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('DELETE', 'category', { id });
+        return;
+      }
+
       const response = await apiService.deleteCategory(id);
-      
       if (!response.success) {
-        // Revert optimistic update
         setCategories(originalCategories);
+        await storageService.saveCategories(originalCategories);
         throw new Error(response.error || 'Failed to delete category');
       }
     } catch (err) {
-      // Revert optimistic update
-      setCategories(categories);
+      if (isOnline) {
+        setCategories(categories);
+        await storageService.saveCategories(categories);
+      } else {
+        await queueOperation('DELETE', 'category', { id });
+      }
       setError(err instanceof Error ? err.message : 'Failed to delete category');
       throw err;
     }
@@ -321,27 +587,29 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const reorderCategories = async (reorderedCategories: Category[]) => {
     try {
-      // Optimistic update
       const originalCategories = [...categories];
       setCategories(reorderedCategories);
+      await storageService.saveCategories(reorderedCategories);
 
-      // API call - update each category with new order
+      if (!isOnline) {
+        for (const category of reorderedCategories) {
+          await queueOperation('UPDATE', 'category', category);
+        }
+        return;
+      }
+
       const updatePromises = reorderedCategories.map((category, index) =>
         apiService.updateCategory(category.id, { order: index })
       );
-      
       const responses = await Promise.all(updatePromises);
-      
-      // Check if any failed
       const failedResponse = responses.find(response => !response.success);
       if (failedResponse) {
-        // Revert optimistic update
         setCategories(originalCategories);
+        await storageService.saveCategories(originalCategories);
         throw new Error(failedResponse.error || 'Failed to reorder categories');
       }
     } catch (err) {
-      // Revert optimistic update
-      setCategories(categories);
+      if (isOnline) await loadAllData();
       setError(err instanceof Error ? err.message : 'Failed to reorder categories');
       throw err;
     }
@@ -350,27 +618,31 @@ export function DataProvider({ children }: DataProviderProps) {
   // Transaction methods
   const addTransaction = async (transactionData: Omit<Transaction, 'id'>) => {
     try {
-      // Optimistic update
-      const tempTransaction: Transaction = {
-        ...transactionData,
-        id: `temp-${Date.now()}`,
-      };
-      setTransactions(prev => [...prev, tempTransaction]);
+      const tempTransaction: Transaction = { ...transactionData, id: `temp-${Date.now()}` };
+      const newTransactions = [...transactions, tempTransaction];
+      setTransactions(newTransactions);
+      await storageService.saveTransactions(newTransactions);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('CREATE', 'transaction', tempTransaction);
+        return;
+      }
+
       const response = await apiService.createTransaction(transactionData);
-      
       if (response.success && response.data?.data) {
-        // Replace temp transaction with real one
-        setTransactions(prev => prev.map(trans => 
-          trans.id === tempTransaction.id ? response.data!.data : trans
-        ));
+        const updated = transactions.map(trans => trans.id === tempTransaction.id ? response.data!.data : trans);
+        setTransactions(updated);
+        await storageService.saveTransactions(updated);
       } else {
         throw new Error(response.error || 'Failed to create transaction');
       }
     } catch (err) {
-      // Revert optimistic update
-      setTransactions(prev => prev.filter(trans => !trans.id.startsWith('temp-')));
+      if (isOnline) {
+        setTransactions(transactions);
+        await storageService.saveTransactions(transactions);
+      } else {
+        await queueOperation('CREATE', 'transaction', { ...transactionData, id: `temp-${Date.now()}` });
+      }
       setError(err instanceof Error ? err.message : 'Failed to add transaction');
       throw err;
     }
@@ -378,23 +650,25 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const updateTransaction = async (transaction: Transaction) => {
     try {
-      // Optimistic update
       const originalTransactions = [...transactions];
-      setTransactions(prev => prev.map(trans => 
-        trans.id === transaction.id ? transaction : trans
-      ));
+      const updated = transactions.map(trans => trans.id === transaction.id ? transaction : trans);
+      setTransactions(updated);
+      await storageService.saveTransactions(updated);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('UPDATE', 'transaction', transaction);
+        return;
+      }
+
       const response = await apiService.updateTransaction(transaction.id, transaction);
-      
       if (!response.success) {
-        // Revert optimistic update
         setTransactions(originalTransactions);
+        await storageService.saveTransactions(originalTransactions);
         throw new Error(response.error || 'Failed to update transaction');
       }
     } catch (err) {
-      // Revert optimistic update
-      await loadAllData();
+      if (isOnline) await loadAllData();
+      else await queueOperation('UPDATE', 'transaction', transaction);
       setError(err instanceof Error ? err.message : 'Failed to update transaction');
       throw err;
     }
@@ -402,21 +676,29 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const deleteTransaction = async (id: string) => {
     try {
-      // Optimistic update
       const originalTransactions = [...transactions];
-      setTransactions(prev => prev.filter(trans => trans.id !== id));
+      const updated = transactions.filter(trans => trans.id !== id);
+      setTransactions(updated);
+      await storageService.saveTransactions(updated);
 
-      // API call
+      if (!isOnline) {
+        await queueOperation('DELETE', 'transaction', { id });
+        return;
+      }
+
       const response = await apiService.deleteTransaction(id);
-      
       if (!response.success) {
-        // Revert optimistic update
         setTransactions(originalTransactions);
+        await storageService.saveTransactions(originalTransactions);
         throw new Error(response.error || 'Failed to delete transaction');
       }
     } catch (err) {
-      // Revert optimistic update
-      setTransactions(transactions);
+      if (isOnline) {
+        setTransactions(transactions);
+        await storageService.saveTransactions(transactions);
+      } else {
+        await queueOperation('DELETE', 'transaction', { id });
+      }
       setError(err instanceof Error ? err.message : 'Failed to delete transaction');
       throw err;
     }
@@ -475,6 +757,12 @@ export function DataProvider({ children }: DataProviderProps) {
     error,
     isInitialized,
     isLoadingData,
+    
+    // Offline/Sync state
+    isOnline,
+    isSyncing,
+    offlineQueueCount,
+    lastSyncTime: lastSyncTimestamp,
 
     // Account methods
     addAccount,
@@ -498,6 +786,7 @@ export function DataProvider({ children }: DataProviderProps) {
 
     // Utility methods
     refreshData,
+    triggerSync,
   };
 
   return (

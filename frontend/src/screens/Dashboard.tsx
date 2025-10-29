@@ -8,6 +8,7 @@ import AccountForm from './AccountForm';
 import { useData, Account } from '../contexts/DataContext';
 import DraggableAccountList from '../components/DraggableAccountList';
 import { formatCurrency } from '../utils/formatters';
+import SyncStatusIndicator from '../components/SyncStatusIndicator';
 
 export default function Dashboard() {
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
@@ -130,6 +131,7 @@ export default function Dashboard() {
           {error && (
             <Text style={styles.errorText}>{error}</Text>
           )}
+          <SyncStatusIndicator />
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity 

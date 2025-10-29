@@ -70,7 +70,13 @@ function generateTransactionHash(tx: any): string {
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
-      const transaction = new Transaction(req.body);
+      const transactionData = {
+        ...req.body,
+        updatedAt: Date.now(),
+        syncVersion: 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
+      };
+      const transaction = new Transaction(transactionData);
       await transaction.save();
       
       res.status(201).json({
@@ -167,9 +173,22 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
+      const existingTransaction = await Transaction.findOne(
+        addSoftDeleteFilter({ _id: req.params.id })
+      );
+
+      if (!existingTransaction) {
+        res.status(404).json({ 
+          error: translate('transactions.not_found', req.lang) 
+        });
+        return;
+      }
+
       const updateData = {
         ...req.body,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        syncVersion: (existingTransaction.syncVersion || 1) + 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
       };
       
       const transaction = await Transaction.findOneAndUpdate(
@@ -180,13 +199,6 @@ export default {
         .populate("fromAccount")
         .populate("toAccount")
         .populate("category");
-        
-      if (!transaction) {
-        res.status(404).json({ 
-          error: translate('transactions.not_found', req.lang) 
-        });
-        return;
-      }
       
       res.json({
         data: transformTransactionForFrontend(transaction),
@@ -198,7 +210,8 @@ export default {
   },
   delete: async (req: Request, res: Response): Promise<void> => {
     try {
-      const transaction = await performSoftDelete(Transaction, req.params.id);
+      const deviceId = req.body?.deviceId || req.headers['x-device-id'] as string || 'system';
+      const transaction = await performSoftDelete(Transaction, req.params.id, deviceId);
       
       if (!transaction) {
         res.status(404).json({ 

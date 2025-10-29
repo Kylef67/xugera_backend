@@ -14,6 +14,8 @@ interface ITransaction extends Document {
     isDeleted?: boolean;
     deletedAt?: Date;
     updatedAt?: number;
+    syncVersion?: number;
+    lastModifiedBy?: string;
     softDelete(): Promise<ITransaction>;
 }
 
@@ -74,6 +76,14 @@ const transactionSchema: Schema = new mongoose.Schema({
     updatedAt: {
         type: Number,
         default: Date.now
+    },
+    syncVersion: {
+        type: Number,
+        default: 1
+    },
+    lastModifiedBy: {
+        type: String,
+        default: 'system'
     }
 }, { timestamps: true }) // Add automatic createdAt/updatedAt
 

@@ -46,7 +46,13 @@ function generateCategoryHash(category: any): string {
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
-      const category = new Category(req.body);
+      const categoryData = {
+        ...req.body,
+        updatedAt: Date.now(),
+        syncVersion: 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
+      };
+      const category = new Category(categoryData);
       await category.save();
       res.status(201).json({
         data: transformCategoryForFrontend(category),
@@ -173,19 +179,24 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
-      const updateData = {
-        ...req.body,
-        updatedAt: Date.now()
-      };
-      
-      const category = await Category.findByIdAndUpdate(req.params.id, updateData, {
-        new: true,
-      });
+      const category = await Category.findById(req.params.id);
       if (!category) {
         res.status(404).json({ error: translate('categories.not_found', req.lang) });
         return;
       }
-      res.json(transformCategoryForFrontend(category));
+
+      const updateData = {
+        ...req.body,
+        updatedAt: Date.now(),
+        syncVersion: (category.syncVersion || 1) + 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
+      };
+      
+      const updatedCategory = await Category.findByIdAndUpdate(req.params.id, updateData, {
+        new: true,
+      });
+      
+      res.json(transformCategoryForFrontend(updatedCategory));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -200,11 +211,19 @@ export default {
         return;
       }
 
-      const category = await Category.findByIdAndDelete(req.params.id);
+      const category = await Category.findById(req.params.id);
       if (!category) {
         res.status(404).json({ error: translate('categories.not_found', req.lang) });
         return;
       }
+
+      // Soft delete (mark as deleted but keep in database for sync purposes)
+      category.updatedAt = Date.now();
+      category.syncVersion = (category.syncVersion || 1) + 1;
+      category.lastModifiedBy = req.body?.deviceId || req.headers['x-device-id'] as string || 'system';
+      // Note: Category model doesn't have isDeleted field yet, but Transaction does
+      await category.save();
+
       res.json({ message: translate('categories.deleted_success', req.lang) });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

@@ -44,7 +44,13 @@ function transformAccountForFrontend(account: any): any {
 export default {
   post: async (req: Request, res: Response): Promise<void> => {
     try {
-      const account = new Account(req.body);
+      const accountData = {
+        ...req.body,
+        updatedAt: Date.now(),
+        syncVersion: 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
+      };
+      const account = new Account(accountData);
       await account.save();
       res.status(201).json({
         data: transformAccountForFrontend(account),
@@ -160,30 +166,43 @@ export default {
   },
   update: async (req: Request, res: Response): Promise<void> => {
     try {
-      const updateData = {
-        ...req.body,
-        updatedAt: Date.now()
-      };
-      
-      const account = await Account.findByIdAndUpdate(req.params.id, updateData, {
-        new: true,
-      });
+      const account = await Account.findById(req.params.id);
       if (!account) {
         res.status(404).json({ error: translate('accounts.not_found', req.lang) });
         return;
       }
-      res.json(transformAccountForFrontend(account));
+
+      const updateData = {
+        ...req.body,
+        updatedAt: Date.now(),
+        syncVersion: (account.syncVersion || 1) + 1,
+        lastModifiedBy: req.body.deviceId || req.headers['x-device-id'] || 'system'
+      };
+      
+      const updatedAccount = await Account.findByIdAndUpdate(req.params.id, updateData, {
+        new: true,
+      });
+      
+      res.json(transformAccountForFrontend(updatedAccount));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
   },
   delete: async (req: Request, res: Response): Promise<void> => {
     try {
-      const account = await Account.findByIdAndDelete(req.params.id);
+      const account = await Account.findById(req.params.id);
       if (!account) {
         res.status(404).json({ error: translate('accounts.not_found', req.lang) });
         return;
       }
+
+      // Soft delete
+      account.isDeleted = true;
+      account.updatedAt = Date.now();
+      account.syncVersion = (account.syncVersion || 1) + 1;
+      account.lastModifiedBy = req.body?.deviceId || req.headers['x-device-id'] as string || 'system';
+      await account.save();
+
       res.json({ message: translate('accounts.deleted_success', req.lang) });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -338,6 +357,7 @@ export default {
   updateOrder: async (req: Request, res: Response): Promise<void> => {
     try {
       const { accounts } = req.body;
+      const deviceId = req.body.deviceId || req.headers['x-device-id'] || 'system';
       
       if (!Array.isArray(accounts)) {
         res.status(400).json({ error: 'Accounts must be an array' });
@@ -350,9 +370,14 @@ export default {
           return Promise.reject(new Error('Each account must have an id and order'));
         }
         
+        const account = await Account.findById(item.id);
+        if (!account) return null;
+
         return Account.findByIdAndUpdate(item.id, { 
           order: item.order,
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          syncVersion: (account.syncVersion || 1) + 1,
+          lastModifiedBy: deviceId
         });
       });
       
