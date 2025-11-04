@@ -118,8 +118,8 @@ export default {
         dateFilter.$lte = toDateObj;
       }
       
-      // Get all accounts sorted by order
-      const accounts = await Account.find({ isDeleted: false }).sort({ order: 1 });
+      // Get all accounts sorted by order (include deleted for sync purposes)
+      const accounts = await Account.find({}).sort({ order: 1 });
       
       // Calculate balances for each account
       const accountsWithBalances = await Promise.all(

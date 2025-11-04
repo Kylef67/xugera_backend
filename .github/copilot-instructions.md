@@ -88,3 +88,6 @@ npm run test                            # Run Playwright tests (requires fronten
   - Navigation between tabs uses cached context data, never triggers fresh API calls
   - Optimistic updates provide immediate feedback while API calls happen in background
   - Failed API calls automatically revert optimistic updates and refresh from server
+
+- always assume the frontend service is already running at http://localhost:8081
+- always assume the backend service is already running at http://localhost:3000

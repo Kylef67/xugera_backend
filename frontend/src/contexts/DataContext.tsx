@@ -424,9 +424,11 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const deleteAccount = async (id: string) => {
     try {
-      // Optimistic update
+      // Optimistic update - mark as deleted instead of removing
       const originalAccounts = [...accounts];
-      const updatedAccounts = accounts.filter(acc => acc.id !== id);
+      const updatedAccounts = accounts.map(acc => 
+        acc.id === id ? { ...acc, isDeleted: true } : acc
+      );
       setAccounts(updatedAccounts);
       await storageService.saveAccounts(updatedAccounts);
 
@@ -446,11 +448,9 @@ export function DataProvider({ children }: DataProviderProps) {
         throw new Error(response.error || 'Failed to delete account');
       }
     } catch (err) {
+      // Revert to original state on error
       if (isOnline) {
-        setAccounts(accounts);
-        await storageService.saveAccounts(accounts);
-      } else {
-        await queueOperation('DELETE', 'account', { id });
+        await loadAllData();
       }
       setError(err instanceof Error ? err.message : 'Failed to delete account');
       throw err;
@@ -739,7 +739,8 @@ export function DataProvider({ children }: DataProviderProps) {
     try {
       const response = await apiService.getAllTransactions(params);
       if (response.success && response.data) {
-        return response.data;
+        // Filter out deleted transactions
+        return response.data.filter(t => !t.isDeleted);
       }
       throw new Error(response.error || 'Failed to get transactions');
     } catch (err) {

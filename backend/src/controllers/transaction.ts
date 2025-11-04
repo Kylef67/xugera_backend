@@ -105,8 +105,8 @@ export default {
         filter.category = category;
       }
 
-      // Add soft delete filter
-      filter = addSoftDeleteFilter(filter);
+      // Don't filter deleted transactions - frontend handles filtering for sync purposes
+      // filter = addSoftDeleteFilter(filter);
       
       if (fromDate || toDate) {
         filter.transactionDate = {};

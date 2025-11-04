@@ -356,7 +356,7 @@ export default function Transactions() {
     if (typeof accountId === 'object' && accountId !== null) {
       return accountId.name;
     }
-    const account = accounts.find(acc => acc.id === accountId);
+    const account = accounts.find(acc => acc.id === accountId && !acc.isDeleted);
     return account?.name || 'Unknown Account';
   };
 

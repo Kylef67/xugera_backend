@@ -1,5 +1,5 @@
 import React, { useRef, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable, TextInput, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
@@ -35,6 +35,9 @@ export default function Dashboard() {
   // Filter accounts based on search query and type filter
   const filteredAccounts = useMemo(() => {
     return accounts.filter(account => {
+      // Filter out deleted accounts
+      if (account.isDeleted) return false;
+      
       // Apply search filter
       const matchesSearch = searchQuery === '' || 
         account.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -50,7 +53,7 @@ export default function Dashboard() {
   const totalBalance = useMemo(() => {
     return filteredAccounts.reduce((sum, account) => {
       if (account.includeInTotal !== false) {
-        return sum + account.balance;
+        return sum + (account.balance || 0);
       }
       return sum;
     }, 0);
@@ -79,21 +82,46 @@ export default function Dashboard() {
     setShowAccountForm(true);
   };
 
-  const handleDeleteAccount = (account: Account) => {
-    Alert.alert(
-      "Delete Account",
-      `Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive",
-          onPress: () => {
-            deleteAccount(account.id);
-          }
+  const handleDeleteAccount = async (account: Account) => {
+    console.log('Delete account clicked:', account.name, account.id);
+    
+    // On web, use window.confirm since Alert doesn't work well
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Are you sure you want to delete "${account.name}"? This action cannot be undone.`);
+      if (confirmed) {
+        try {
+          console.log('Deleting account:', account.id);
+          await deleteAccount(account.id);
+          console.log('Account deleted successfully');
+        } catch (error) {
+          console.error('Error deleting account:', error);
+          alert('Failed to delete account: ' + (error as Error).message);
         }
-      ]
-    );
+      }
+    } else {
+      // On mobile, use Alert
+      Alert.alert(
+        "Delete Account",
+        `Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { 
+            text: "Delete", 
+            style: "destructive",
+            onPress: async () => {
+              try {
+                console.log('Deleting account:', account.id);
+                await deleteAccount(account.id);
+                console.log('Account deleted successfully');
+              } catch (error) {
+                console.error('Error deleting account:', error);
+                Alert.alert('Error', 'Failed to delete account: ' + (error as Error).message);
+              }
+            }
+          }
+        ]
+      );
+    }
   };
 
   const handleReorderAccounts = (reorderedAccounts: Account[]) => {

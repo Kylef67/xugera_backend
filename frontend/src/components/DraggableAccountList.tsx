@@ -73,7 +73,10 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
     return (
       <Pressable 
         style={styles.deleteAction}
-        onPress={() => onDeleteAccount(item)}
+        onPress={() => {
+          console.log('Swipe delete button pressed for account:', item.name);
+          onDeleteAccount(item);
+        }}
       >
         <MaterialCommunityIcons name="trash-can-outline" size={24} color="white" />
         <Text style={styles.deleteActionText}>Delete</Text>
@@ -164,7 +167,11 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
               </View>
               {onDeleteAccount && (
                 <Pressable 
-                  onPress={() => onDeleteAccount(item)}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    console.log('Delete button clicked for account:', item.name);
+                    onDeleteAccount(item);
+                  }}
                   style={styles.webDeleteButton}
                 >
                   <MaterialCommunityIcons name="trash-can-outline" size={20} color="#8E8E93" />
