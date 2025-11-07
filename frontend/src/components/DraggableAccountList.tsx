@@ -167,6 +167,7 @@ export const DraggableAccountList: React.FC<DraggableAccountListProps> = ({
               </View>
               {onDeleteAccount && (
                 <Pressable 
+                  testID={`delete-account-${item.id}`}
                   onPress={(e) => {
                     e?.stopPropagation?.();
                     console.log('Delete button clicked for account:', item.name);
